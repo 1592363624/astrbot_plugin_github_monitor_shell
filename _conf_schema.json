@@ -1,0 +1,22 @@
+{
+  "github_token": {
+    "type": "string",
+    "description": "GitHub API Token (可选，用于提高API限制)",
+    "default": ""
+  },
+  "repositories": {
+    "type": "list",
+    "description": "要监控的仓库列表",
+    "default": []
+  },
+  "check_interval": {
+    "type": "int",
+    "description": "检查间隔（分钟）",
+    "default": 60
+  },
+  "notification_targets": {
+    "type": "list",
+    "description": "通知目标（QQ号）",
+    "default": []
+  }
+}

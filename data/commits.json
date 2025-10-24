@@ -1,0 +1,44 @@
+{
+  "1592363624/App-Store/main": {
+    "sha": "17004cce2ef6d458c5c88308f4e4fb3ec776c49e",
+    "message": "Update README.md",
+    "author": "Shell",
+    "date": "2025-10-24T08:04:04Z",
+    "url": "https://github.com/1592363624/App-Store/commit/17004cce2ef6d458c5c88308f4e4fb3ec776c49e"
+  },
+  "EraAsh/astrbot_plugin_admin_emoji_reply/main": {
+    "sha": "4371c23ad40bc0fa0a9fa96a170f70afb41e0f16",
+    "message": "Add files via upload",
+    "author": "Era Ash",
+    "date": "2025-09-17T15:37:40Z",
+    "url": "https://github.com/EraAsh/astrbot_plugin_admin_emoji_reply/commit/4371c23ad40bc0fa0a9fa96a170f70afb41e0f16"
+  },
+  "Zhalslar/astrbot_plugin_box/main": {
+    "sha": "dd635b36819769eb3b41936f371172182f537aa8",
+    "message": "fix: 修复开关",
+    "author": "Zhalslar",
+    "date": "2025-09-03T15:56:34Z",
+    "url": "https://github.com/Zhalslar/astrbot_plugin_box/commit/dd635b36819769eb3b41936f371172182f537aa8"
+  },
+  "1592363624/astrbot_plugin_github_monitor_shell/main": {
+    "sha": "dd01c1387933c298ec788bb781c599a2587294ff",
+    "message": "Initial commit",
+    "author": "Shell",
+    "date": "2025-10-24T03:45:31Z",
+    "url": "https://github.com/1592363624/astrbot_plugin_github_monitor_shell/commit/dd01c1387933c298ec788bb781c599a2587294ff"
+  },
+  "Maoer233/astrbot_plugin_steam_status_monitor/main": {
+    "sha": "8db0f3185e777df22b7308a211956adef7209215",
+    "message": "更新README\n\nUpdated instructions for handling polling errors and added support for multiple SteamIDs in the add command.",
+    "author": "Maoer",
+    "date": "2025-10-09T16:40:35Z",
+    "url": "https://github.com/Maoer233/astrbot_plugin_steam_status_monitor/commit/8db0f3185e777df22b7308a211956adef7209215"
+  },
+  "tinkerbellqwq/astrbot_plugin_help/master": {
+    "sha": "06f8c61c88a3fe404fb676ea50aa98dfad0bc5b8",
+    "message": "更新 README.md",
+    "author": "tinker",
+    "date": "2025-08-21T08:53:55Z",
+    "url": "https://github.com/tinkerbellqwq/astrbot_plugin_help/commit/06f8c61c88a3fe404fb676ea50aa98dfad0bc5b8"
+  }
+}
