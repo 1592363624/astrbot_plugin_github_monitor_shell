@@ -23,8 +23,8 @@ class GitHubMonitorPlugin(Star):
         self.notification_service = NotificationService(context)
         self.data_file = os.path.join(os.path.dirname(__file__), "data", "commits.json")
         self.bot_instance = None  # 将全局变量改为类实例变量
+        self.monitoring_started = False  # 添加标志以跟踪监控是否已启动
         self._ensure_data_dir()
-        self._start_monitoring()
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=999)
     async def _capture_bot_instance(self, event: AstrMessageEvent):
@@ -37,6 +37,8 @@ class GitHubMonitorPlugin(Star):
                     self.bot_instance = event.bot
                     self.platform_name = "aiocqhttp"
                     logger.info("成功捕获 aiocqhttp 机器人实例，后台 API 调用已启用。")
+                    # 在捕获到 bot_instance 后启动监控
+                    self._start_monitoring()
             except ImportError:
                 logger.warning("无法导入 AiocqhttpMessageEvent，后台 API 调用可能受限。")
 
@@ -67,7 +69,11 @@ class GitHubMonitorPlugin(Star):
 
     def _start_monitoring(self):
         """启动监控任务"""
-        asyncio.create_task(self._monitor_loop())
+        # 只启动一次监控任务
+        if not self.monitoring_started:
+            asyncio.create_task(self._monitor_loop())
+            self.monitoring_started = True
+            logger.info("GitHub 监控任务已启动")
 
     async def _monitor_loop(self):
         """监控循环"""
