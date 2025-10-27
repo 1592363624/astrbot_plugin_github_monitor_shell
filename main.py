@@ -176,10 +176,10 @@ class GitHubMonitorPlugin(Star):
                 else:
                     continue
 
-                repo_key = f"{owner}/{repo}/tree/{branch}"
+                repo_key = f"{owner}/{repo}/{branch}"
                 commit_info = commit_data.get(repo_key)
 
-                message += f"📁 {repo_key}\n"
+                message += f"📁 {owner}/{repo}/tree/{branch}\n"
                 if commit_info:
                     message += f"  最新Commit: {commit_info['sha'][:7]}\n"
                     message += f"  更新时间: {commit_info['date']}\n"
