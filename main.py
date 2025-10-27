@@ -94,8 +94,10 @@ class GitHubMonitorPlugin(Star):
         notification_targets = self.config.get("notification_targets", [])
 
         for repo_config in repositories:
+            logger.info(f"检查仓库配置: {repo_config}")
             if isinstance(repo_config, str):
                 owner, repo = repo_config.split("/", 1)
+                logger.debug(f"监控仓库: owner={owner}, repo={repo}")
                 branch = None  # 不指定分支，使用默认分支
             elif isinstance(repo_config, dict):
                 owner = repo_config.get("owner")
