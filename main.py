@@ -45,8 +45,7 @@ class GitHubMonitorPlugin(Star):
     def _ensure_data_dir(self):
         """确保数据目录存在"""
         data_dir = os.path.dirname(self.data_file)
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
+        os.makedirs(data_dir, exist_ok=True)
 
     def _load_commit_data(self) -> Dict:
         """加载commit数据"""
@@ -103,9 +102,11 @@ class GitHubMonitorPlugin(Star):
                 repo = repo_config.get("repo")
                 branch = repo_config.get("branch")  # 如果没有指定分支，会使用默认分支
             else:
+                logger.warning(f"无效的仓库配置: {repo_config}")
                 continue
 
             if not owner or not repo:
+                logger.warning(f"仓库配置缺少owner或repo: {repo_config}")
                 continue
 
             # 获取最新commit
