@@ -16,7 +16,7 @@ class GitHubService:
         if token:
             self.headers["Authorization"] = f"token {token}"
 
-    async def get_latest_commit(self, owner: str, repo: str, branch: str = None) -> Optional[Dict]:
+    async def get_latest_commit(self, owner: str, repo: str, branch: str | None = None) -> Optional[Dict]:
         """获取指定仓库最新commit信息"""
         try:
             # 如果没有指定分支，则获取默认分支
