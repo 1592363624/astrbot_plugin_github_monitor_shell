@@ -176,7 +176,7 @@ class GitHubMonitorPlugin(Star):
                 else:
                     continue
 
-                repo_key = f"{owner}/{repo}/{branch}"
+                repo_key = f"{owner}/{repo}/tree/{branch}"
                 commit_info = commit_data.get(repo_key)
 
                 message += f"📁 {repo_key}\n"
