@@ -19,7 +19,7 @@ class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
         self.config = config or {}
-        self.github_service = GitHubService(config.get("github_token", ""))
+        self.github_service = GitHubService(self.config.get("github_token", ""))
         self.notification_service = NotificationService(context)
         self.data_file = os.path.join(os.path.dirname(__file__), "data", "commits.json")
         self.bot_instance = None  # 将全局变量改为类实例变量
@@ -169,6 +169,8 @@ class GitHubMonitorPlugin(Star):
                     owner = repo_config.get("owner")
                     repo = repo_config.get("repo")
                     branch = repo_config.get("branch")
+                    if (not owner) or (not repo):
+                        continue
                     # 如果没有指定分支，获取默认分支
                     if not branch:
                         repo_info = await self.github_service.get_repository_info(owner, repo)
