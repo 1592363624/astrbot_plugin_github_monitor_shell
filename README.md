@@ -19,3 +19,9 @@
 /github_status  手动触发监控检查
 
 /github_monitor  查看监控状态
+
+# 配置说明
+
+除了原有的配置项，现在还支持：
+
+- `group_notification_targets`: 群通知目标（群号列表），可以将通知发送到指定的群聊中

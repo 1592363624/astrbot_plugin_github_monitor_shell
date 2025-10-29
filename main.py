@@ -13,7 +13,7 @@ from .services.notification_service import NotificationService
 # 移除了 global_vars 的导入
 
 
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.0.0",
+@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.0.1",
           "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -131,9 +131,10 @@ class GitHubMonitorPlugin(Star):
                     repo_info = await self.github_service.get_repository_info(owner, repo)
 
                 # 发送通知
-                if repo_info and notification_targets:
+                if repo_info:
+                    group_notification_targets = self.config.get("group_notification_targets", [])
                     await self.notification_service.send_commit_notification(
-                        repo_info, new_commit, old_commit, notification_targets
+                        repo_info, new_commit, old_commit, notification_targets, group_notification_targets
                     )
 
                 # 更新数据

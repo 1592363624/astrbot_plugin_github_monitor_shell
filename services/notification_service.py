@@ -7,13 +7,20 @@ class NotificationService:
     def __init__(self, context):
         self.context = context
 
-    async def send_commit_notification(self, repo_info: Dict, new_commit: Dict, old_commit: Dict | None, targets: List[str]):
+    async def send_commit_notification(self, repo_info: Dict, new_commit: Dict, old_commit: Dict | None, targets: List[str],
+                                       group_targets: List[str] = None):
         """发送commit变更通知"""
         try:
             message = self._format_commit_message(repo_info, new_commit, old_commit)
 
+            # 发送私聊消息
             for target in targets:
                 await self._send_private_message(int(target), message)
+
+            # 发送群消息
+            if group_targets:
+                for group_target in group_targets:
+                    await self._send_group_message(int(group_target), message)
 
         except Exception as e:
             logger.error(f"发送通知失败: {str(e)}")
@@ -29,7 +36,7 @@ class NotificationService:
         message += f"📝 SHA: {new_commit['sha'][:7]}\n"
         message += f"👤 作者: {new_commit['author']}\n"
         message += f"📅 时间: {new_commit['date']}\n"
-        message += f"💬 信息: {new_commit['message'][:50]}{'...' if len(new_commit['message']) > 50 else ''}\n"
+        message += f"💬 信息: {new_commit['message']}\n"
         message += f"🔗 链接: {new_commit['url']}\n\n"
 
         if old_commit:
@@ -63,5 +70,34 @@ class NotificationService:
 
         except Exception as e:
             error_msg = f"发送私聊消息失败: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {"success": False, "message": error_msg}
+
+    async def _send_group_message(self, group_id: int, message: str):
+        """通过捕获的 NapCat bot 实例主动发送群消息"""
+        try:
+            # 获取插件实例来访问 bot_instance
+            github_plugin = None
+            # 通过 context 获取所有插件，然后找到我们的插件
+            for star in self.context.get_all_stars():
+                if star.name == "GitHub监控插件":
+                    github_plugin = star.star_cls
+                    break
+
+            if not github_plugin or not github_plugin.bot_instance:
+                logger.error("❌ bot 实例未捕获，无法发送群消息。")
+                return {"success": False, "message": "未捕获 bot 实例"}
+
+            # 直接调用 NapCat API（底层同 /send_group_msg）
+            result = await github_plugin.bot_instance.api.call_action(
+                "send_group_msg",
+                group_id=group_id,
+                message=message
+            )
+            logger.info(f"✅ 成功向群 {group_id} 发送消息: {message}")
+            return {"success": True, "result": result}
+
+        except Exception as e:
+            error_msg = f"发送群消息失败: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return {"success": False, "message": error_msg}

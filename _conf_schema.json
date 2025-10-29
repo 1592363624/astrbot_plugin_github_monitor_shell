@@ -18,5 +18,10 @@
     "type": "list",
     "description": "通知目标（QQ号）",
     "default": []
+  },
+  "group_notification_targets": {
+    "type": "list",
+    "description": "群通知目标（群号）",
+    "default": []
   }
 }
