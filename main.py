@@ -179,7 +179,11 @@ class GitHubMonitorPlugin(Star):
                 repo_key = f"{owner}/{repo}/{branch}"
                 commit_info = commit_data.get(repo_key)
 
-                message += f"📁 {owner}/{repo}/tree/{branch}\n"
+                if branch:
+                    message += f"📁 https://github.com/{owner}/{repo}/tree/{branch}\n"
+                else:
+                    message += f"📁 https://github.com/{owner}/{repo}\n"
+
                 if commit_info:
                     message += f"  最新Commit: {commit_info['sha'][:7]}\n"
                     message += f"  更新时间: {commit_info['date']}\n"
