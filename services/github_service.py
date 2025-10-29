@@ -16,7 +16,7 @@ class GitHubService:
         if token:
             self.headers["Authorization"] = f"token {token}"
 
-    async def get_latest_commit(self, owner: str, repo: str, branch: str = None) -> Optional[Dict]:
+    async def get_latest_commit(self, owner: str, repo: str, branch: str | None = None) -> Optional[Dict]:
         """获取指定仓库最新commit信息"""
         try:
             # 如果没有指定分支，则获取默认分支
@@ -25,9 +25,13 @@ class GitHubService:
                 if repo_info and "default_branch" in repo_info:
                     branch = repo_info["default_branch"]
                 else:
-                    branch = "main"  # fallback to main
+                    logger.error("无法获取默认分支信息")
+                    logger.error(f"请检查仓库 {owner}/{repo} 是否存在，或是否有访问权限。")
+                    logger.error(f"并确保可以正常访问 GitHub API：https://api.github.com/repos/{owner}/{repo}")
 
             url = f"{self.base_url}/repos/{owner}/{repo}/commits/{branch}"
+
+            logger.info(f"正在获取最新commit信息: {url}")
 
             # 使用内置证书和禁用SSL验证
             async with httpx.AsyncClient(
@@ -57,6 +61,8 @@ class GitHubService:
         """获取仓库信息"""
         try:
             url = f"{self.base_url}/repos/{owner}/{repo}"
+
+            logger.info(f"正在获取仓库信息: {url}")
 
             # 使用内置证书和禁用SSL验证
             async with httpx.AsyncClient(

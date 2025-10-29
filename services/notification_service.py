@@ -7,7 +7,7 @@ class NotificationService:
     def __init__(self, context):
         self.context = context
 
-    async def send_commit_notification(self, repo_info: Dict, new_commit: Dict, old_commit: Dict, targets: List[str],
+    async def send_commit_notification(self, repo_info: Dict, new_commit: Dict, old_commit: Dict | None, targets: List[str],
                                        group_targets: List[str] = None):
         """发送commit变更通知"""
         try:
@@ -25,7 +25,7 @@ class NotificationService:
         except Exception as e:
             logger.error(f"发送通知失败: {str(e)}")
 
-    def _format_commit_message(self, repo_info: Dict, new_commit: Dict, old_commit: Dict) -> str:
+    def _format_commit_message(self, repo_info: Dict, new_commit: Dict, old_commit: Dict | None) -> str:
         """格式化commit消息"""
         repo_name = f"{repo_info['owner']['login']}/{repo_info['name']}"
 
