@@ -40,5 +40,19 @@
     "author": "tinker",
     "date": "2025-08-21T08:53:55Z",
     "url": "https://github.com/tinkerbellqwq/astrbot_plugin_help/commit/06f8c61c88a3fe404fb676ea50aa98dfad0bc5b8"
+  },
+  "1592363624/astrbot_plugin_re_xiuxian_shell/main": {
+    "sha": "88703655ecaa06f50ecffb69bf4f90969d772182",
+    "message": "Initial commit",
+    "author": "Shell",
+    "date": "2025-10-29T02:37:05Z",
+    "url": "https://github.com/1592363624/astrbot_plugin_re_xiuxian_shell/commit/88703655ecaa06f50ecffb69bf4f90969d772182"
+  },
+  "1592363624/re_xiuxian_shell.github.io/main": {
+    "sha": "6411cc58615082d35ae4148bd470f46f57e4b63f",
+    "message": "style(editor): 美化地图编辑器界面并增强交互效果- 更新全局字体族以提高兼容性\n- 应用渐变背景和装饰性浮动元素\n-重构布局为全屏响应式设计\n- 美化表单控件和按钮样式\n- 增强地图节点的视觉效果和悬停动画\n- 改进连接线和箭头的样式- 添加返回首页按钮\n- 实现节点拖拽功能优化- 增加移动端适配支持- 提升整体视觉层次和用户体验\n地址:http://1592363624.github.io/re_xiuxian_shell.github.io/",
+    "author": "Shell",
+    "date": "2025-10-29T06:14:34Z",
+    "url": "https://github.com/1592363624/re_xiuxian_shell.github.io/commit/6411cc58615082d35ae4148bd470f46f57e4b63f"
   }
 }
