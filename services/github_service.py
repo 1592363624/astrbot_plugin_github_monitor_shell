@@ -18,6 +18,7 @@ class GitHubService:
 
     async def get_latest_commit(self, owner: str, repo: str, branch: str | None = None) -> Optional[Dict]:
         """获取指定仓库最新commit信息"""
+        logger.info(f"获取最新commit: owner={owner}, repo={repo}, branch={branch}")
         try:
             # 如果没有指定分支，则获取默认分支
             if not branch:
@@ -38,20 +39,23 @@ class GitHubService:
                     timeout=30.0,
                     verify=False
             ) as client:
-                response = await client.get(url, headers=self.headers)
+                try:
+                    response = await client.get(url, headers=self.headers)
+                    response.raise_for_status()  # 自动抛出HTTP错误状态码的异常
+                
+                    commit_data = response.json()
+                    return {
+                        "sha": commit_data["sha"],
+                        "message": commit_data["commit"]["message"],
+                        "author": commit_data["commit"]["author"]["name"],
+                        "date": commit_data["commit"]["author"]["date"],
+                        "url": commit_data["html_url"]
+                    }
+            
+                except httpx.HTTPError as e:
+                    logger.error(f"请求commit信息失败: {str(e)}")
+                    return None
 
-            if response.status_code == 200:
-                commit_data = response.json()
-                return {
-                    "sha": commit_data["sha"],
-                    "message": commit_data["commit"]["message"],
-                    "author": commit_data["commit"]["author"]["name"],
-                    "date": commit_data["commit"]["author"]["date"],
-                    "url": commit_data["html_url"]
-                }
-            else:
-                logger.error(f"获取commit失败: {response.status_code} - {response.text}")
-                return None
 
         except Exception as e:
             logger.error(f"请求GitHub API失败: {str(e)}")
@@ -66,16 +70,17 @@ class GitHubService:
 
             # 使用内置证书和禁用SSL验证
             async with httpx.AsyncClient(
-                    timeout=30.0,
-                    verify=False
+                verify=False
             ) as client:
                 response = await client.get(url, headers=self.headers)
 
-            if response.status_code == 200:
+                response.raise_for_status()
+
                 return response.json()
-            else:
-                logger.error(f"获取仓库信息失败: {response.status_code}")
-                return None
+            
+        except httpx.HTTPError as e:
+            logger.error(f"获取仓库信息失败: {response.status_code} - {response.text}")
+            return None
 
         except Exception as e:
             logger.error(f"获取仓库信息失败: {str(e)}")
