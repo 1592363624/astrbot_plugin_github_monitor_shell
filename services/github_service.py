@@ -18,6 +18,7 @@ class GitHubService:
 
     async def get_latest_commit(self, owner: str, repo: str, branch: str | None = None) -> Optional[Dict]:
         """获取指定仓库最新commit信息"""
+        logger.info(f"获取最新commit: owner={owner}, repo={repo}, branch={branch}")
         try:
             # 如果没有指定分支，则获取默认分支
             if not branch:

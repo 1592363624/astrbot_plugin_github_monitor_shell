@@ -3,6 +3,8 @@ import json
 import os
 from typing import Dict
 
+from urllib.parse import urlparse
+
 from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
@@ -87,6 +89,7 @@ class GitHubMonitorPlugin(Star):
     async def _check_repositories(self):
         """检查所有仓库的更新"""
         repositories = self.config.get("repositories", [])
+        logger.info(f"开始检查配置的仓库: {repositories}")
         if not repositories:
             return
 
@@ -96,13 +99,27 @@ class GitHubMonitorPlugin(Star):
         for repo_config in repositories:
             logger.info(f"检查仓库配置: {repo_config}")
             if isinstance(repo_config, str):
-                owner, repo = repo_config.split("/", 1)
-                logger.debug(f"监控仓库: owner={owner}, repo={repo}")
+                try:
+                    result = urlparse(repo_config)
+                    if result.netloc == "github.com":
+                        route = result.path.strip("/").split("/")
+                        if len(route) >= 2:
+                            owner, repo = route[0], route[1]
+                        else:
+                            raise ValueError("无效的仓库URL")
+                        branch = None  # 不指定分支，使用默认分支
+                    else:
+                        raise ValueError("不支持的的仓库URL")
+                except Exception as e:
+                    logger.error(f"解析仓库URL失败: {str(e)}")
+                    owner, repo = repo_config.split("/", 1)
+    
                 branch = None  # 不指定分支，使用默认分支
             elif isinstance(repo_config, dict):
+                logger.debug(f"监控仓库: owner={owner}, repo={repo}, branch={branch}")
                 owner = repo_config.get("owner")
                 repo = repo_config.get("repo")
-                branch = repo_config.get("branch")  # 如果没有指定分支，会使用默认分支
+                branch = repo_config.get("branch",None)  # 如果没有指定分支，会使用默认分支
             else:
                 logger.warning(f"无效的仓库配置: {repo_config}")
                 continue
