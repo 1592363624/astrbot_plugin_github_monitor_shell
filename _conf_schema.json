@@ -6,7 +6,7 @@
   },
   "repositories": {
     "type": "list",
-    "description": "要监控的仓库列表",
+    "description": "要监控的仓库列表owner/repo 形式,例如:1592363624/astrbot_plugin_github_monitor_shell",
     "default": []
   },
   "check_interval": {
