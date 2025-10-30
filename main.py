@@ -6,6 +6,7 @@ from typing import Dict
 from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
+from astrbot.core.star import StarTools
 from .services.github_service import GitHubService
 from .services.notification_service import NotificationService
 
@@ -13,7 +14,7 @@ from .services.notification_service import NotificationService
 # 移除了 global_vars 的导入
 
 
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.0.2",
+@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.0.3",
           "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -21,7 +22,8 @@ class GitHubMonitorPlugin(Star):
         self.config = config or {}
         self.github_service = GitHubService(self.config.get("github_token", ""))
         self.notification_service = NotificationService(context)
-        self.data_file = os.path.join(os.path.dirname(__file__), "data", "commits.json")
+        plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
+        self.data_file = os.path.join(plugin_data_dir, "commits.json")
         self.bot_instance = None  # 将全局变量改为类实例变量
         self.monitoring_started = False  # 添加标志以跟踪监控是否已启动
         self._ensure_data_dir()
