@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from typing import Dict
+from typing import Dict, List
 
 from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
@@ -41,6 +41,8 @@ class GitHubMonitorPlugin(Star):
                     logger.info("成功捕获 aiocqhttp 机器人实例，后台 API 调用已启用。")
                     # 在捕获到 bot_instance 后启动监控
                     self._start_monitoring()
+                    # 重试之前失败的通知
+                    await self.notification_service.retry_failed_notifications()
             except ImportError:
                 logger.warning("无法导入 AiocqhttpMessageEvent，后台 API 调用可能受限。")
 
@@ -81,6 +83,8 @@ class GitHubMonitorPlugin(Star):
         while True:
             try:
                 await self._check_repositories()
+                # 定期重试失败的通知
+                await self.notification_service.retry_failed_notifications()
                 await asyncio.sleep(self.config.get("check_interval", 30) * 60)
             except Exception as e:
                 logger.error(f"监控循环出错: {str(e)}")
@@ -140,17 +144,26 @@ class GitHubMonitorPlugin(Star):
                 if not repo_info:
                     repo_info = await self.github_service.get_repository_info(owner, repo)
 
+                # 获取所有新的提交
+                new_commits = [new_commit]  # 默认至少包含最新提交
+                if old_commit and old_commit.get("sha"):
+                    # 获取从上次记录的提交之后的所有提交
+                    commits_since = await self.github_service.get_commits_since(
+                        owner, repo, old_commit.get("sha"), branch)
+                    if commits_since:
+                        new_commits = commits_since
+
                 # 发送通知
                 if repo_info:
                     # 合并全局群通知目标和该仓库专用的群通知目标
                     global_groups = self.config.get("group_notification_targets", [])
                     all_groups = list(set(global_groups + extra_groups))  # 去重合并
                     await self.notification_service.send_commit_notification(
-                        repo_info, new_commit, old_commit, notification_targets, all_groups
+                        repo_info, new_commits, notification_targets, all_groups
                     )
 
                 # 更新数据
-                commit_data[repo_key] = new_commit
+                commit_data[repo_key] = new_commit  # 仍然只保存最新的提交SHA用于比较
                 self._save_commit_data(commit_data)
 
     @filter.command("github_monitor")

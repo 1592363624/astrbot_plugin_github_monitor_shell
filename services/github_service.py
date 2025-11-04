@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 import httpx
 
@@ -51,6 +51,65 @@ class GitHubService:
                 }
             else:
                 logger.error(f"获取commit失败: {response.status_code} - {response.text}")
+                return None
+
+        except Exception as e:
+            logger.error(f"请求GitHub API失败: {str(e)}")
+            return None
+
+    async def get_commits_since(self, owner: str, repo: str, since_sha: str, branch: str | None = None) -> Optional[
+        List[Dict]]:
+        """获取从指定commit之后的所有commit信息"""
+        try:
+            # 如果没有指定分支，则获取默认分支
+            if not branch:
+                repo_info = await self.get_repository_info(owner, repo)
+                if repo_info and "default_branch" in repo_info:
+                    branch = repo_info["default_branch"]
+                else:
+                    logger.error("无法获取默认分支信息")
+                    logger.error(f"请检查仓库 {owner}/{repo} 是否存在，或是否有访问权限。")
+                    logger.error(f"并确保可以正常访问 GitHub API：https://api.github.com/repos/{owner}/{repo}")
+                    return None
+
+            # 获取提交列表，从最新的开始，直到since_sha
+            url = f"{self.base_url}/repos/{owner}/{repo}/commits"
+            params = {
+                "sha": branch,
+                "per_page": 10  # 限制最多获取10个提交，防止过多数据
+            }
+
+            logger.info(f"正在获取commit历史信息: {url}")
+
+            # 使用内置证书和禁用SSL验证
+            async with httpx.AsyncClient(
+                    timeout=30.0,
+                    verify=False
+            ) as client:
+                response = await client.get(url, headers=self.headers, params=params)
+
+            if response.status_code == 200:
+                commits_data = response.json()
+                commits = []
+
+                # 收集从最新到since_sha之间的所有提交
+                for commit_data in commits_data:
+                    commit = {
+                        "sha": commit_data["sha"],
+                        "message": commit_data["commit"]["message"],
+                        "author": commit_data["commit"]["author"]["name"],
+                        "date": commit_data["commit"]["author"]["date"],
+                        "url": commit_data["html_url"]
+                    }
+                    commits.append(commit)
+
+                    # 如果到达了上次记录的commit，则停止
+                    if commit_data["sha"] == since_sha:
+                        break
+
+                return commits
+            else:
+                logger.error(f"获取commit历史失败: {response.status_code} - {response.text}")
                 return None
 
         except Exception as e:
