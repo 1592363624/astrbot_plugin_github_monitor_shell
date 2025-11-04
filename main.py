@@ -14,7 +14,7 @@ from .services.notification_service import NotificationService
 # 移除了 global_vars 的导入
 
 
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.1.0",
+@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.1.1",
           "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -105,8 +105,13 @@ class GitHubMonitorPlugin(Star):
             # 字典格式: {"owner": "...", "repo": "...", "groups": [...], ...}
             extra_groups = []
             if isinstance(repo_config, str):
+                # 分离仓库路径和群号
                 parts = repo_config.split("|")
-                owner, repo = parts[0].split("/", 1)
+                repo_path = parts[0]
+                if "/" not in repo_path:
+                    logger.warning(f"无效的仓库路径格式: {repo_config}")
+                    continue
+                owner, repo = repo_path.split("/", 1)
                 branch = None  # 不指定分支，使用默认分支
                 if len(parts) > 1:
                     extra_groups = parts[1:]  # 提取额外的群号
@@ -187,7 +192,12 @@ class GitHubMonitorPlugin(Star):
 
             for repo_config in repositories:
                 if isinstance(repo_config, str):
-                    owner, repo = repo_config.split("/", 1)
+                    # 正确处理带群号的仓库配置
+                    parts = repo_config.split("|")
+                    repo_path = parts[0]
+                    if "/" not in repo_path:
+                        continue
+                    owner, repo = repo_path.split("/", 1)
                     # 获取仓库信息以确定默认分支
                     repo_info = await self.github_service.get_repository_info(owner, repo)
                     default_branch = repo_info.get("default_branch", "main") if repo_info else "main"
