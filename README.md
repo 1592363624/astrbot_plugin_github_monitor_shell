@@ -12,7 +12,8 @@
 
 # 效果图
 
-<img width="484" height="395" alt="Shell截图_20251024165627" src="https://github.com/user-attachments/assets/d20e0b0b-cdf5-465c-b673-7d808e66b1d1" />
+<img width="947" height="809" alt="Shell截图_20251104142553" src="https://github.com/user-attachments/assets/b10366c3-c6e6-4f0f-a77c-d6c122ac6611" />
+
 
 # 手动触发指令
 
