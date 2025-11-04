@@ -1,13 +1,15 @@
 {
   "github_token": {
     "type": "string",
-    "description": "GitHub API Token (可选，用于提高API限制)",
-    "default": ""
+    "description": "GitHub API Token",
+    "default": "",
+    "hint": "如果你的仓库很多，建议你在这里配置一个 GitHub API Token，以提高API调用的限制。"
   },
   "repositories": {
     "type": "list",
-    "description": "要监控的仓库列表owner/repo 形式,例如:1592363624/astrbot_plugin_github_monitor_shell",
-    "default": []
+    "description": "要监控的仓库列表，支持两种格式：1.字符串格式 2.字典格式 ",
+    "default": [],
+    "hint": "例如:1592363624/astrbot_plugin_github_monitor_shell|123456|91219736 或 {\"owner\": \"1592363624\", \"repo\": \"astrbot_plugin_github_monitor_shell\", \"groups\": [\"123456\", \"91219736\"]}"
   },
   "check_interval": {
     "type": "int",
@@ -21,7 +23,8 @@
   },
   "group_notification_targets": {
     "type": "list",
-    "description": "群通知目标（群号）",
-    "default": []
+    "description": "全局群通知目标（群号）",
+    "default": [],
+    "hint": "所有仓库更新时都会通知这些群组，如果需要为特定仓库配置额外的群组，请在仓库配置中指定"
   }
 }

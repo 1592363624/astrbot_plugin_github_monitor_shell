@@ -14,7 +14,7 @@ from .services.notification_service import NotificationService
 # 移除了 global_vars 的导入
 
 
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.0.3",
+@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.0.4",
           "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -96,13 +96,21 @@ class GitHubMonitorPlugin(Star):
         notification_targets = self.config.get("notification_targets", [])
 
         for repo_config in repositories:
+            # 支持新的仓库配置格式，可以在仓库后指定群号
+            # 字符串格式: "owner/repo|group1|group2|..."
+            # 字典格式: {"owner": "...", "repo": "...", "groups": [...], ...}
+            extra_groups = []
             if isinstance(repo_config, str):
-                owner, repo = repo_config.split("/", 1)
+                parts = repo_config.split("|")
+                owner, repo = parts[0].split("/", 1)
                 branch = None  # 不指定分支，使用默认分支
+                if len(parts) > 1:
+                    extra_groups = parts[1:]  # 提取额外的群号
             elif isinstance(repo_config, dict):
                 owner = repo_config.get("owner")
                 repo = repo_config.get("repo")
                 branch = repo_config.get("branch")  # 如果没有指定分支，会使用默认分支
+                extra_groups = repo_config.get("groups", [])  # 获取该仓库专用的群号列表
             else:
                 logger.warning(f"无效的仓库配置: {repo_config}")
                 continue
@@ -134,9 +142,11 @@ class GitHubMonitorPlugin(Star):
 
                 # 发送通知
                 if repo_info:
-                    group_notification_targets = self.config.get("group_notification_targets", [])
+                    # 合并全局群通知目标和该仓库专用的群通知目标
+                    global_groups = self.config.get("group_notification_targets", [])
+                    all_groups = list(set(global_groups + extra_groups))  # 去重合并
                     await self.notification_service.send_commit_notification(
-                        repo_info, new_commit, old_commit, notification_targets, group_notification_targets
+                        repo_info, new_commit, old_commit, notification_targets, all_groups
                     )
 
                 # 更新数据

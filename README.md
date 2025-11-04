@@ -25,3 +25,44 @@
 除了原有的配置项，现在还支持：
 
 - `group_notification_targets`: 群通知目标（群号列表），可以将通知发送到指定的群聊中
+
+## 仓库配置增强功能
+
+现在支持为每个仓库单独配置通知群组：
+
+### 字符串格式配置（推荐）
+
+```json
+"repositories": [
+"owner/repo",
+"owner/repo|123456|91219736"
+]
+```
+
+### 字典格式配置
+
+```json
+"repositories": [
+{
+"owner": "owner",
+"repo": "repo"
+},
+{
+"owner": "owner",
+"repo": "repo",
+"groups": ["123456", "91219736"]
+}
+]
+```
+
+示例：
+
+```json
+"repositories": [
+"1592363624/astrbot_plugin_github_monitor_shell",
+"1592363624/astrbot_plugin_github_monitor_shell|123456789|91219736"
+]
+```
+
+表示监控 1592363624/astrbot_plugin_github_monitor_shell 仓库，当第二个仓库有更新时，除了全局配置的群通知目标外，还会通知
+123456789 和 91219736 群组。
