@@ -23,11 +23,53 @@ class NotificationService:
         try:
             if os.path.exists(self.failed_notifications_file):
                 with open(self.failed_notifications_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    # 清理过期的通知数据（比如仓库已删除的通知）
+                    valid_notifications = [n for n in data if self._is_notification_valid(n)]
+                    if len(valid_notifications) != len(data):
+                        self._save_failed_notifications(valid_notifications)
+                    return valid_notifications
             return []
         except Exception as e:
             logger.error(f"加载失败通知记录失败: {str(e)}")
             return []
+
+    def _is_notification_valid(self, notification: Dict) -> bool:
+        """检查通知是否仍然有效（仓库是否仍然在配置中）"""
+        try:
+            # 获取插件实例来访问配置
+            github_plugin = None
+            for star in self.context.get_all_stars():
+                if star.name == "GitHub监控插件":
+                    github_plugin = star.star_cls
+                    break
+            
+            if github_plugin and github_plugin.config:
+                repositories = self.config.get("repositories", "")
+                repo_info = notification.get("repo_info", {})
+                
+                # 检查仓库是否仍在配置中
+                for repo_config in repositories:
+                    if isinstance(repo_config, str):
+                        # 字符串格式: "owner/repo|group1|group2|..."
+                        parts = repo_config.split("|")
+                        repo_path = parts[0]
+                        if "/" in repo_path:
+                            owner, repo = repo_path.split("/", 1)
+                            if (owner == repo_info.get('owner', {}).get('login') and 
+                                repo == repo_info.get('name')):
+                                return True
+                    elif isinstance(repo_config, dict):
+                        # 字典格式: {"owner": "...", "repo": "...", "groups": [...], ...}
+                        if (repo_config.get("owner") == repo_info.get('owner', {}).get('login') and 
+                            repo_config.get("repo") == repo_info.get('name')):
+                            return True
+            # 如果无法确定，保留通知（宁可多发也不漏发）
+            return True
+        except Exception as e:
+            logger.error(f"检查通知有效性时出错: {str(e)}")
+            # 出错时保留通知
+            return True
 
     def _save_failed_notifications(self, notifications: List):
         """保存发送失败的通知"""
@@ -64,6 +106,11 @@ class NotificationService:
     async def send_commit_notification(self, repo_info: Dict, new_commits: List[Dict], targets: List[str],
                                        group_targets: List[str] = None):
         """发送commit变更通知"""
+        # 检查是否有有效的提交
+        if not new_commits:
+            logger.info("没有新的提交需要通知")
+            return
+            
         try:
             success = await self._send_notification(repo_info, new_commits, targets, group_targets)
 
@@ -104,16 +151,18 @@ class NotificationService:
             
             # 发送私聊消息
             for target in targets:
-                result = await self._send_private_message(int(target), message)
-                if not result.get("success", False):
-                    success = False
+                if target:  # 确保目标不为空
+                    result = await self._send_private_message(int(target), message)
+                    if not result.get("success", False):
+                        success = False
 
             # 发送群消息
             if group_targets:
                 for group_target in group_targets:
-                    result = await self._send_group_message(int(group_target), message)
-                    if not result.get("success", False):
-                        success = False
+                    if group_target:  # 确保目标不为空
+                        result = await self._send_group_message(int(group_target), message)
+                        if not result.get("success", False):
+                            success = False
 
             return success
         except Exception as e:

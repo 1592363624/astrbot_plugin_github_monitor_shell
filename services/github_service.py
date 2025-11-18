@@ -28,6 +28,7 @@ class GitHubService:
                     logger.error("无法获取默认分支信息")
                     logger.error(f"请检查仓库 {owner}/{repo} 是否存在，或是否有访问权限。")
                     logger.error(f"并确保可以正常访问 GitHub API：https://api.github.com/repos/{owner}/{repo}")
+                    return None
 
             url = f"{self.base_url}/repos/{owner}/{repo}/commits/{branch}"
 
@@ -49,6 +50,14 @@ class GitHubService:
                     "date": commit_data["commit"]["author"]["date"],
                     "url": commit_data["html_url"]
                 }
+            elif response.status_code == 404:
+                # 仓库不存在或分支不存在
+                logger.warning(f"仓库或分支不存在: {owner}/{repo}/{branch}")
+                return None
+            elif response.status_code == 403:
+                # API限制或其他权限问题
+                logger.error(f"访问被拒绝或API限制: {response.status_code} - {response.text}")
+                return None
             else:
                 logger.error(f"获取commit失败: {response.status_code} - {response.text}")
                 return None
@@ -108,6 +117,14 @@ class GitHubService:
                         break
 
                 return commits
+            elif response.status_code == 404:
+                # 仓库不存在或分支不存在
+                logger.warning(f"仓库或分支不存在: {owner}/{repo}/{branch}")
+                return None
+            elif response.status_code == 403:
+                # API限制或其他权限问题
+                logger.error(f"访问被拒绝或API限制: {response.status_code} - {response.text}")
+                return None
             else:
                 logger.error(f"获取commit历史失败: {response.status_code} - {response.text}")
                 return None
@@ -132,6 +149,14 @@ class GitHubService:
 
             if response.status_code == 200:
                 return response.json()
+            elif response.status_code == 404:
+                # 仓库不存在
+                logger.warning(f"仓库不存在: {owner}/{repo}")
+                return None
+            elif response.status_code == 403:
+                # API限制或其他权限问题
+                logger.error(f"访问被拒绝或API限制: {response.status_code} - {response.text}")
+                return None
             else:
                 logger.error(f"获取仓库信息失败: {response.status_code}")
                 return None

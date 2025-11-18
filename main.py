@@ -14,7 +14,7 @@ from .services.notification_service import NotificationService
 # 移除了 global_vars 的导入
 
 
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.1.1",
+@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.0",
           "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -98,6 +98,9 @@ class GitHubMonitorPlugin(Star):
 
         commit_data = self._load_commit_data()
         notification_targets = self.config.get("notification_targets", [])
+        
+        # 创建当前配置中的仓库键集合，用于清理已删除的仓库数据
+        configured_repo_keys = set()
 
         for repo_config in repositories:
             # 支持新的仓库配置格式，可以在仓库后指定群号
@@ -128,26 +131,29 @@ class GitHubMonitorPlugin(Star):
                 logger.warning(f"仓库配置缺少owner或repo: {repo_config}")
                 continue
 
+            # 获取仓库信息以确定实际分支
+            repo_info = await self.github_service.get_repository_info(owner, repo)
+            if not repo_info:
+                logger.warning(f"无法获取仓库信息: {owner}/{repo}")
+                continue
+                
+            default_branch = repo_info.get("default_branch", "main") if repo_info else "main"
+            actual_branch = branch if branch else default_branch
+            repo_key = f"{owner}/{repo}/{actual_branch}"
+            
+            # 将当前仓库键添加到配置集合中
+            configured_repo_keys.add(repo_key)
+
             # 获取最新commit
             new_commit = await self.github_service.get_latest_commit(owner, repo, branch)
             if not new_commit:
                 continue
-
-            # 使用仓库的实际默认分支名作为key的一部分
-            repo_info = await self.github_service.get_repository_info(owner, repo)
-            default_branch = repo_info.get("default_branch", "main") if repo_info else "main"
-            actual_branch = branch if branch else default_branch
-            repo_key = f"{owner}/{repo}/{actual_branch}"
 
             old_commit = commit_data.get(repo_key)
 
             # 检查是否有变化
             if not old_commit or old_commit.get("sha") != new_commit["sha"]:
                 logger.info(f"检测到仓库 {repo_key} 有新的commit: {new_commit['sha'][:7]}")
-
-                # 获取仓库信息
-                if not repo_info:
-                    repo_info = await self.github_service.get_repository_info(owner, repo)
 
                 # 获取所有新的提交
                 new_commits = [new_commit]  # 默认至少包含最新提交
@@ -157,9 +163,12 @@ class GitHubMonitorPlugin(Star):
                         owner, repo, old_commit.get("sha"), branch)
                     if commits_since:
                         new_commits = commits_since
+                    elif commits_since is None:
+                        # API调用失败，跳过此仓库
+                        continue
 
-                # 发送通知
-                if repo_info:
+                # 发送通知 (只有在确实有新提交时才发送)
+                if repo_info and new_commits:
                     # 合并全局群通知目标和该仓库专用的群通知目标
                     global_groups = self.config.get("group_notification_targets", [])
                     all_groups = list(set(global_groups + extra_groups))  # 去重合并
@@ -170,6 +179,14 @@ class GitHubMonitorPlugin(Star):
                 # 更新数据
                 commit_data[repo_key] = new_commit  # 仍然只保存最新的提交SHA用于比较
                 self._save_commit_data(commit_data)
+                
+        # 清理已删除仓库的数据
+        removed_keys = set(commit_data.keys()) - configured_repo_keys
+        for removed_key in removed_keys:
+            del commit_data[removed_key]
+            logger.info(f"已清理已删除仓库的数据: {removed_key}")
+        if removed_keys:
+            self._save_commit_data(commit_data)
 
     @filter.command("github_monitor")
     async def monitor_command(self, event: AstrMessageEvent):
