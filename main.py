@@ -14,7 +14,7 @@ from .services.notification_service import NotificationService
 # 移除了 global_vars 的导入
 
 
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.0",
+@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.1",
           "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
