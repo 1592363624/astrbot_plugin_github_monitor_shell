@@ -3,6 +3,9 @@ import os
 from typing import List, Dict
 
 from astrbot.api import logger
+from astrbot.api.platform import MessageType
+from astrbot.core.message.message_event_result import MessageChain
+from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.star import StarTools
 
 
@@ -43,11 +46,11 @@ class NotificationService:
                 if star.name == "GitHub监控插件":
                     github_plugin = star.star_cls
                     break
-            
+
             if github_plugin and github_plugin.config:
-                repositories = self.config.get("repositories", "")
+                repositories = github_plugin.config.get("repositories", "")
                 repo_info = notification.get("repo_info", {})
-                
+
                 # 检查仓库是否仍在配置中
                 for repo_config in repositories:
                     if isinstance(repo_config, str):
@@ -56,13 +59,13 @@ class NotificationService:
                         repo_path = parts[0]
                         if "/" in repo_path:
                             owner, repo = repo_path.split("/", 1)
-                            if (owner == repo_info.get('owner', {}).get('login') and 
-                                repo == repo_info.get('name')):
+                            if (owner == repo_info.get('owner', {}).get('login') and
+                                    repo == repo_info.get('name')):
                                 return True
                     elif isinstance(repo_config, dict):
                         # 字典格式: {"owner": "...", "repo": "...", "groups": [...], ...}
-                        if (repo_config.get("owner") == repo_info.get('owner', {}).get('login') and 
-                            repo_config.get("repo") == repo_info.get('name')):
+                        if (repo_config.get("owner") == repo_info.get('owner', {}).get('login') and
+                                repo_config.get("repo") == repo_info.get('name')):
                             return True
             # 如果无法确定，保留通知（宁可多发也不漏发）
             return True
@@ -110,7 +113,7 @@ class NotificationService:
         if not new_commits:
             logger.info("没有新的提交需要通知")
             return
-            
+
         try:
             success = await self._send_notification(repo_info, new_commits, targets, group_targets)
 
@@ -148,7 +151,7 @@ class NotificationService:
             message = self._format_commit_message(repo_info, new_commits)
 
             success = True
-            
+
             # 发送私聊消息
             for target in targets:
                 if target:  # 确保目标不为空
@@ -199,58 +202,65 @@ class NotificationService:
         return message
 
     async def _send_private_message(self, user_id: int, message: str):
-        """通过捕获的 NapCat bot 实例主动发送私聊消息"""
+        """通过 AstrBot 通用接口主动发送私聊消息"""
         try:
-            # 获取插件实例来访问 bot_instance
-            github_plugin = None
-            # 通过 context 获取所有插件，然后找到我们的插件
-            for star in self.context.get_all_stars():
-                if star.name == "GitHub监控插件":
-                    github_plugin = star.star_cls
-                    break
-
-            if not github_plugin or not github_plugin.bot_instance:
-                logger.warning("❌ bot 实例未捕获，无法发送私聊消息。")
-                return {"success": False, "message": "未捕获 bot 实例"}
-
-            # 直接调用 NapCat API（底层同 /send_private_msg）
-            result = await github_plugin.bot_instance.api.call_action(
-                "send_private_msg",
-                user_id=user_id,
-                message=message
+            user_id_str = str(user_id)
+            if not user_id_str.isdigit():
+                error_msg = f"发送私聊消息失败: 非法的QQ号:{user_id_str}"
+                logger.error(error_msg)
+                return {"success": False, "message": error_msg}
+            message_chain = MessageChain().message(message)
+            await StarTools.send_message_by_id(
+                type="PrivateMessage",
+                id=user_id_str,
+                message_chain=message_chain,
             )
             logger.info(f"✅ 成功向 {user_id} 发送私聊消息")
-            return {"success": True, "result": result}
-
+            return {"success": True}
         except Exception as e:
             error_msg = f"发送私聊消息失败: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return {"success": False, "message": error_msg}
 
     async def _send_group_message(self, group_id: int, message: str):
-        """通过捕获的 NapCat bot 实例主动发送群消息"""
+        """通过 AstrBot 通用接口主动发送群消息"""
         try:
-            # 获取插件实例来访问 bot_instance
-            github_plugin = None
-            # 通过 context 获取所有插件，然后找到我们的插件
-            for star in self.context.get_all_stars():
-                if star.name == "GitHub监控插件":
-                    github_plugin = star.star_cls
-                    break
+            group_id_str = str(group_id)
+            message_chain = MessageChain().message(message)
 
-            if not github_plugin or not github_plugin.bot_instance:
-                logger.warning("❌ bot 实例未捕获，无法发送群消息。")
-                return {"success": False, "message": "未捕获 bot 实例"}
+            if group_id_str.isdigit():
+                await StarTools.send_message_by_id(
+                    type="GroupMessage",
+                    id=group_id_str,
+                    message_chain=message_chain,
+                )
+                logger.info(f"✅ 成功向 QQ 群 {group_id_str} 发送消息")
+                return {"success": True}
 
-            # 直接调用 NapCat API（底层同 /send_group_msg）
-            result = await github_plugin.bot_instance.api.call_action(
-                "send_group_msg",
-                group_id=group_id,
-                message=message
-            )
-            logger.info(f"✅ 成功向群 {group_id} 发送消息")
-            return {"success": True, "result": result}
+            if group_id_str.startswith("-"):
+                platform_id = None
+                for platform in self.context.platform_manager.platform_insts:
+                    meta = platform.meta()
+                    if meta.name == "telegram":
+                        platform_id = meta.id
+                        break
+                if not platform_id:
+                    error_msg = "发送群消息失败: 未找到Telegram适配器"
+                    logger.error(error_msg)
+                    return {"success": False, "message": error_msg}
 
+                session = MessageSesion(
+                    platform_name=platform_id,
+                    message_type=MessageType.GROUP_MESSAGE,
+                    session_id=group_id_str,
+                )
+                await StarTools.send_message(session, message_chain)
+                logger.info(f"✅ 成功向 Telegram 群 {group_id_str} 发送消息")
+                return {"success": True}
+
+            error_msg = f"发送群消息失败: 非法的群标识:{group_id_str}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
         except Exception as e:
             error_msg = f"发送群消息失败: {str(e)}"
             logger.error(error_msg, exc_info=True)

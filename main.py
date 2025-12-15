@@ -24,27 +24,9 @@ class GitHubMonitorPlugin(Star):
         self.notification_service = NotificationService(context)
         plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
         self.data_file = os.path.join(plugin_data_dir, "commits.json")
-        self.bot_instance = None  # 将全局变量改为类实例变量
         self.monitoring_started = False  # 添加标志以跟踪监控是否已启动
         self._ensure_data_dir()
-
-    @filter.event_message_type(filter.EventMessageType.ALL, priority=999)
-    async def _capture_bot_instance(self, event: AstrMessageEvent):
-        """捕获机器人实例用于后台任务"""
-
-        if self.bot_instance is None and event.get_platform_name() == "aiocqhttp":
-            try:
-                from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
-                if isinstance(event, AiocqhttpMessageEvent):
-                    self.bot_instance = event.bot
-                    self.platform_name = "aiocqhttp"
-                    logger.info("成功捕获 aiocqhttp 机器人实例，后台 API 调用已启用。")
-                    # 在捕获到 bot_instance 后启动监控
-                    self._start_monitoring()
-                    # 重试之前失败的通知
-                    await self.notification_service.retry_failed_notifications()
-            except ImportError:
-                logger.warning("无法导入 AiocqhttpMessageEvent，后台 API 调用可能受限。")
+        self._start_monitoring()
 
     def _ensure_data_dir(self):
         """确保数据目录存在"""
