@@ -1,5 +1,6 @@
 name: GitHub监控插件
+display_name: GitHub监控插件
 author: Shell
-version: 1.2.1
+version: 1.2.2
 description: 定时监控GitHub仓库commit变化并发送通知
 repo: https://github.com/1592363624/astrbot_plugin_github_monitor_shell
