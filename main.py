@@ -25,6 +25,7 @@ class GitHubMonitorPlugin(Star):
         plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
         self.data_file = os.path.join(plugin_data_dir, "commits.json")
         self.monitoring_started = False  # 添加标志以跟踪监控是否已启动
+        self._monitor_task: asyncio.Task | None = None
         self._ensure_data_dir()
         self._start_monitoring()
 
@@ -56,9 +57,21 @@ class GitHubMonitorPlugin(Star):
         """启动监控任务"""
         # 只启动一次监控任务
         if not self.monitoring_started:
-            asyncio.create_task(self._monitor_loop())
+            self._monitor_task = asyncio.create_task(self._monitor_loop())
             self.monitoring_started = True
             logger.info("GitHub 监控任务已启动")
+
+    async def terminate(self):
+        if self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning(f"终止监控任务时出错: {str(e)}")
+        self.monitoring_started = False
+        self._monitor_task = None
 
     async def _monitor_loop(self):
         """监控循环"""

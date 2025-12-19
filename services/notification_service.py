@@ -44,7 +44,11 @@ class NotificationService:
         try:
             if os.path.exists(self.failed_notifications_file):
                 with open(self.failed_notifications_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+                    data = json.load(f) or []
+                    if not isinstance(data, list):
+                        return []
+                    data = self._normalize_failed_notifications(data)
+                    data = self._dedupe_failed_notifications(data)
                     # 清理过期的通知数据（比如仓库已删除的通知）
                     valid_notifications = [n for n in data if self._is_notification_valid(n)]
                     if len(valid_notifications) != len(data):
@@ -54,6 +58,89 @@ class NotificationService:
         except Exception as e:
             logger.error(f"加载失败通知记录失败: {str(e)}")
             return []
+
+    def _normalize_failed_notifications(self, notifications: List[Dict]) -> List[Dict]:
+        normalized: List[Dict] = []
+        for n in notifications:
+            if not isinstance(n, dict):
+                continue
+            repo_info = n.get("repo_info")
+            new_commits = n.get("new_commits")
+            if not isinstance(repo_info, dict) or not isinstance(new_commits, list) or not new_commits:
+                continue
+
+            targets = n.get("targets", [])
+            group_targets = n.get("group_targets", [])
+            if targets is None:
+                targets = []
+            if group_targets is None:
+                group_targets = []
+
+            item = {
+                "repo_info": repo_info,
+                "new_commits": new_commits,
+                "targets": self._normalize_target_list(targets),
+                "group_targets": self._normalize_target_list(group_targets),
+            }
+            item["key"] = n.get("key") or self._build_notification_key(repo_info, new_commits)
+            item["attempts"] = int(n.get("attempts", 0) or 0)
+            item["created_at"] = n.get("created_at") or datetime.utcnow().isoformat()
+            normalized.append(item)
+        return normalized
+
+    def _dedupe_failed_notifications(self, notifications: List[Dict]) -> List[Dict]:
+        merged: Dict[str, Dict] = {}
+        for n in notifications:
+            key = n.get("key")
+            if not key:
+                continue
+            if key not in merged:
+                merged[key] = n
+                continue
+
+            existing = merged[key]
+            existing["targets"] = self._merge_unique(existing.get("targets", []), n.get("targets", []))
+            existing["group_targets"] = self._merge_unique(
+                existing.get("group_targets", []),
+                n.get("group_targets", []),
+            )
+            existing["attempts"] = max(int(existing.get("attempts", 0) or 0), int(n.get("attempts", 0) or 0))
+            existing_created_at = existing.get("created_at")
+            n_created_at = n.get("created_at")
+            if isinstance(existing_created_at, str) and isinstance(n_created_at, str):
+                existing["created_at"] = min(existing_created_at, n_created_at)
+        return list(merged.values())
+
+    def _merge_unique(self, a: List[str], b: List[str]) -> List[str]:
+        merged = []
+        seen = set()
+        for item in (a or []) + (b or []):
+            if item in seen:
+                continue
+            seen.add(item)
+            merged.append(item)
+        return merged
+
+    def _normalize_target_list(self, items) -> List[str]:
+        if not isinstance(items, list):
+            return []
+        cleaned: List[str] = []
+        for x in items:
+            if x is None:
+                continue
+            s = str(x).strip()
+            if not s:
+                continue
+            cleaned.append(s)
+        return cleaned
+
+    def _build_notification_key(self, repo_info: Dict, new_commits: List[Dict]) -> str:
+        owner = (repo_info.get("owner") or {}).get("login") or "unknown"
+        repo = repo_info.get("name") or "unknown"
+        sha = ""
+        if new_commits and isinstance(new_commits[0], dict):
+            sha = new_commits[0].get("sha") or ""
+        return f"{owner}/{repo}@{sha}"
 
     def _is_notification_valid(self, notification: Dict) -> bool:
         """检查通知是否仍然有效（仓库是否仍然在配置中）"""
@@ -96,7 +183,9 @@ class NotificationService:
         """保存发送失败的通知"""
         try:
             with open(self.failed_notifications_file, 'w', encoding='utf-8') as f:
-                json.dump(notifications, f, ensure_ascii=False, indent=2)
+                normalized = self._normalize_failed_notifications(notifications)
+                normalized = self._dedupe_failed_notifications(normalized)
+                json.dump(normalized, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"保存失败通知记录失败: {str(e)}")
 
@@ -110,14 +199,20 @@ class NotificationService:
         remaining_notifications = []
 
         for notification in failed_notifications:
-            success = await self._send_notification(
+            targets = notification.get("targets", [])
+            group_targets = notification.get("group_targets", [])
+
+            failed_targets, failed_group_targets = await self._send_notification_collect_failures(
                 notification["repo_info"],
                 notification["new_commits"],
-                notification["targets"],
-                notification["group_targets"]
+                targets,
+                group_targets,
             )
 
-            if not success:
+            if failed_targets or failed_group_targets:
+                notification["targets"] = failed_targets
+                notification["group_targets"] = failed_group_targets
+                notification["attempts"] = int(notification.get("attempts", 0) or 0) + 1
                 remaining_notifications.append(notification)
 
         # 保存仍然失败的通知
@@ -133,62 +228,81 @@ class NotificationService:
             return
 
         try:
-            success = await self._send_notification(repo_info, new_commits, targets, group_targets)
+            failed_targets, failed_group_targets = await self._send_notification_collect_failures(
+                repo_info,
+                new_commits,
+                targets,
+                group_targets,
+            )
 
-            # 如果发送失败，保存到失败列表中
-            if not success:
+            if failed_targets or failed_group_targets:
                 failed_notifications = self._load_failed_notifications()
-                failed_notifications.append({
-                    "repo_info": repo_info,
-                    "new_commits": new_commits,
-                    "targets": targets,
-                    "group_targets": group_targets
-                })
+                failed_notifications.append(
+                    {
+                        "repo_info": repo_info,
+                        "new_commits": new_commits,
+                        "targets": failed_targets,
+                        "group_targets": failed_group_targets,
+                        "key": self._build_notification_key(repo_info, new_commits),
+                        "attempts": 1,
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
                 self._save_failed_notifications(failed_notifications)
-                logger.warning("通知发送失败，已保存到待重试列表")
+                logger.warning("部分通知发送失败，已保存到待重试列表")
         except Exception as e:
             logger.error(f"发送通知失败: {str(e)}")
             # 保存到失败列表中
             try:
                 failed_notifications = self._load_failed_notifications()
-                failed_notifications.append({
-                    "repo_info": repo_info,
-                    "new_commits": new_commits,
-                    "targets": targets,
-                    "group_targets": group_targets
-                })
+                failed_notifications.append(
+                    {
+                        "repo_info": repo_info,
+                        "new_commits": new_commits,
+                        "targets": self._normalize_target_list(targets),
+                        "group_targets": self._normalize_target_list(group_targets),
+                        "key": self._build_notification_key(repo_info, new_commits),
+                        "attempts": 1,
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
                 self._save_failed_notifications(failed_notifications)
                 logger.warning("通知发送异常，已保存到待重试列表")
             except Exception as save_error:
                 logger.error(f"保存失败通知记录也失败了: {str(save_error)}")
 
-    async def _send_notification(self, repo_info: Dict, new_commits: List[Dict], targets: List[str],
-                                 group_targets: List[str] = None) -> bool:
-        """实际发送通知"""
+    async def _send_notification_collect_failures(
+        self,
+        repo_info: Dict,
+        new_commits: List[Dict],
+        targets,
+        group_targets=None,
+    ) -> tuple[List[str], List[str]]:
         try:
             message = self._format_commit_message(repo_info, new_commits)
+            failed_targets: List[str] = []
+            failed_group_targets: List[str] = []
 
-            success = True
-
-            # 发送私聊消息
-            for target in targets:
-                if target:  # 确保目标不为空
+            for target in self._merge_unique(self._normalize_target_list(targets), []):
+                try:
                     result = await self._send_private_message(int(target), message)
                     if not result.get("success", False):
-                        success = False
+                        failed_targets.append(target)
+                except Exception:
+                    failed_targets.append(target)
 
-            # 发送群消息
-            if group_targets:
-                for group_target in group_targets:
-                    if group_target:  # 确保目标不为空
-                        result = await self._send_group_message(int(group_target), message)
-                        if not result.get("success", False):
-                            success = False
+            for group_target in self._merge_unique(self._normalize_target_list(group_targets), []):
+                try:
+                    result = await self._send_group_message(int(group_target), message)
+                    if not result.get("success", False):
+                        failed_group_targets.append(group_target)
+                except Exception:
+                    failed_group_targets.append(group_target)
 
-            return success
+            return failed_targets, failed_group_targets
         except Exception as e:
             logger.error(f"发送通知时发生异常: {str(e)}")
-            return False
+            return self._normalize_target_list(targets), self._normalize_target_list(group_targets)
 
     def _format_commit_message(self, repo_info: Dict, new_commits: List[Dict]) -> str:
         """格式化commit消息"""
