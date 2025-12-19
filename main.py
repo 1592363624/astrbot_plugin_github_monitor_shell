@@ -8,20 +8,20 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star import StarTools
 from .services.github_service import GitHubService
-from .services.notification_service import NotificationService
+from .services.notification_service import NotificationService, format_commit_datetime
 
 
 # 移除了 global_vars 的导入
 
 
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.2",
+@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.3",
           "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
         self.config = config or {}
         self.github_service = GitHubService(self.config.get("github_token", ""))
-        self.notification_service = NotificationService(context)
+        self.notification_service = NotificationService(context, self.config)
         plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
         self.data_file = os.path.join(plugin_data_dir, "commits.json")
         self.monitoring_started = False  # 添加标志以跟踪监控是否已启动
@@ -219,8 +219,20 @@ class GitHubMonitorPlugin(Star):
 
                 message += f"📁 {repo_key}\n"
                 if commit_info:
+                    date_str = commit_info.get("date")
+                    formatted_date = None
+                    if date_str:
+                        formatted_date = format_commit_datetime(
+                            date_str,
+                            self.config.get("time_zone", "Asia/Shanghai"),
+                            self.config.get("time_format", "%Y-%m-%d %H:%M:%S"),
+                        )
+
                     message += f"  最新Commit: {commit_info['sha'][:7]}\n"
-                    message += f"  更新时间: {commit_info['date']}\n"
+                    if formatted_date:
+                        message += f"  更新时间: {formatted_date}\n"
+                    else:
+                        message += f"  更新时间: 未知\n"
                 else:
                     message += f"  状态: 未监控到数据\n"
                 message += "\n"

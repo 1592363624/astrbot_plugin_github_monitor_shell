@@ -26,6 +26,8 @@
 除了原有的配置项，现在还支持：
 
 - `group_notification_targets`: 群通知目标（群号列表），可以将通知发送到指定的群聊中
+- `time_zone`: 时间显示时区（默认 `Asia/Shanghai`，即可显示为北京时间）
+- `time_format`: 时间显示格式，使用 Python `strftime` 语法，默认 `%Y-%m-%d %H:%M:%S`
 
 ## 仓库配置增强功能
 

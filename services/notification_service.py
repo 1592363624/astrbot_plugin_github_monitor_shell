@@ -1,6 +1,8 @@
 import json
 import os
-from typing import List, Dict
+from datetime import datetime
+from typing import List, Dict, Optional
+from zoneinfo import ZoneInfo
 
 from astrbot.api import logger
 from astrbot.api.platform import MessageType
@@ -9,11 +11,27 @@ from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.star import StarTools
 
 
+def format_commit_datetime(
+    date_str: str,
+    time_zone: str,
+    time_format: str,
+) -> Optional[str]:
+    try:
+        normalized = date_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        target_tz = ZoneInfo(time_zone)
+        return dt.astimezone(target_tz).strftime(time_format)
+    except Exception:
+        return None
+
+
 class NotificationService:
-    def __init__(self, context):
+    def __init__(self, context, config: Dict | None = None):
         self.context = context
         plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
         self.failed_notifications_file = os.path.join(plugin_data_dir, "failed_notifications.json")
+        self.time_zone = (config or {}).get("time_zone", "Asia/Shanghai")
+        self.time_format = (config or {}).get("time_format", "%Y-%m-%d %H:%M:%S")
         self._ensure_data_dir()
 
     def _ensure_data_dir(self):
@@ -183,19 +201,35 @@ class NotificationService:
         if len(new_commits) == 1:
             # 只有一个提交的向后兼容格式
             commit = new_commits[0]
+            formatted_date = format_commit_datetime(
+                commit["date"],
+                self.time_zone,
+                self.time_format,
+            )
             message += f"✨ 新Commit:\n"
             message += f"📝 SHA: {commit['sha'][:7]}\n"
             message += f"👤 作者: {commit['author']}\n"
-            message += f"📅 时间: {commit['date']}\n"
+            if formatted_date:
+                message += f"📅 时间: {formatted_date}\n"
+            else:
+                message += f"📅 时间: {commit['date']}\n"
             message += f"💬 信息: {commit['message']}\n"
             message += f"🔗 链接: {commit['url']}\n\n"
         else:
             # 有多个提交的格式
             message += f"✨ 本次更新包含 {len(new_commits)} 个新提交:\n\n"
             for i, commit in enumerate(new_commits, 1):
+                formatted_date = format_commit_datetime(
+                    commit["date"],
+                    self.time_zone,
+                    self.time_format,
+                )
                 message += f"{i}. 提交 SHA: {commit['sha'][:7]}\n"
                 message += f"   作者: {commit['author']}\n"
-                message += f"   时间: {commit['date']}\n"
+                if formatted_date:
+                    message += f"   时间: {formatted_date}\n"
+                else:
+                    message += f"   时间: {commit['date']}\n"
                 message += f"   信息: {commit['message']}\n"
                 message += f"   链接: {commit['url']}\n\n"
 

@@ -26,5 +26,17 @@
     "description": "全局群通知目标（群号）",
     "default": [],
     "hint": "所有仓库更新时都会通知这些群组，如果需要为特定仓库配置额外的群组，请在仓库配置中指定"
+  },
+  "time_zone": {
+    "type": "string",
+    "description": "时间显示时区（IANA 标准名称）",
+    "default": "Asia/Shanghai",
+    "hint": "例如: Asia/Shanghai, UTC"
+  },
+  "time_format": {
+    "type": "string",
+    "description": "时间显示格式（Python strftime）",
+    "default": "%Y-%m-%d %H:%M:%S",
+    "hint": "例如: %Y-%m-%d %H:%M:%S"
   }
 }
