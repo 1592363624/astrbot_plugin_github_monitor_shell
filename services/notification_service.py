@@ -338,14 +338,15 @@ class NotificationService:
                     self.time_zone,
                     self.time_format,
                 )
-                message += f"{i}. 提交 SHA: {commit['sha'][:7]}\n"
-                message += f"   作者: {commit['author']}\n"
+                message += f"{i}. ✨ 新Commit:\n"
+                message += f"   📝 SHA: {commit['sha'][:7]}\n"
+                message += f"   👤 作者: {commit['author']}\n"
                 if formatted_date:
-                    message += f"   时间: {formatted_date}\n"
+                    message += f"   📅 时间: {formatted_date}\n"
                 else:
-                    message += f"   时间: {commit['date']}\n"
-                message += f"   信息: {commit['message']}\n"
-                message += f"   链接: {commit['url']}\n\n"
+                    message += f"   📅 时间: {commit['date']}\n"
+                message += f"   💬 信息: {commit['message']}\n"
+                message += f"   🔗 链接: {commit['url']}\n\n"
 
         return message
 
