@@ -14,7 +14,7 @@ from .services.notification_service import NotificationService, format_commit_da
 # 移除了 global_vars 的导入
 
 
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.3",
+@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.4",
           "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -24,6 +24,7 @@ class GitHubMonitorPlugin(Star):
         self.notification_service = NotificationService(context, self.config)
         plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
         self.data_file = os.path.join(plugin_data_dir, "commits.json")
+        self.sent_notifications_file = os.path.join(plugin_data_dir, "sent_notifications.json")
         self.monitoring_started = False  # 添加标志以跟踪监控是否已启动
         self._monitor_task: asyncio.Task | None = None
         self._ensure_data_dir()
@@ -52,6 +53,42 @@ class GitHubMonitorPlugin(Star):
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"保存commit数据失败: {str(e)}")
+
+    def _load_sent_notifications(self) -> Dict:
+        """加载已发送通知记录"""
+        try:
+            if os.path.exists(self.sent_notifications_file):
+                with open(self.sent_notifications_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            logger.error(f"加载已发送通知记录失败: {str(e)}")
+            return {}
+
+    def _save_sent_notifications(self, data: Dict):
+        """保存已发送通知记录"""
+        try:
+            with open(self.sent_notifications_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存已发送通知记录失败: {str(e)}")
+
+    def _is_commit_already_notified(self, repo_key: str, commit_sha: str, groups: List[str]) -> bool:
+        """检查commit是否已经发送过通知给这些群组"""
+        sent_data = self._load_sent_notifications()
+        repo_data = sent_data.get(repo_key, {})
+        commit_data = repo_data.get(commit_sha, [])
+        return any(set(groups) <= set(g) for g in commit_data)
+
+    def _mark_commit_as_notified(self, repo_key: str, commit_sha: str, groups: List[str]):
+        """标记commit已发送通知"""
+        sent_data = self._load_sent_notifications()
+        if repo_key not in sent_data:
+            sent_data[repo_key] = {}
+        if commit_sha not in sent_data[repo_key]:
+            sent_data[repo_key][commit_sha] = []
+        sent_data[repo_key][commit_sha].append(list(set(groups)))
+        self._save_sent_notifications(sent_data)
 
     def _start_monitoring(self):
         """启动监控任务"""
@@ -159,7 +196,7 @@ class GitHubMonitorPlugin(Star):
                     if commits_since:
                         new_commits = commits_since
                     elif commits_since is None:
-                        # API调用失败，跳过此仓库
+                        # API调用失败，跳过此仓库，但保留旧数据不变
                         continue
 
                 # 发送通知 (只有在确实有新提交时才发送)
@@ -167,9 +204,19 @@ class GitHubMonitorPlugin(Star):
                     # 合并全局群通知目标和该仓库专用的群通知目标
                     global_groups = self.config.get("group_notification_targets", [])
                     all_groups = list(set(global_groups + extra_groups))  # 去重合并
-                    await self.notification_service.send_commit_notification(
-                        repo_info, new_commits, notification_targets, all_groups
-                    )
+
+                    # 检查是否已经发送过通知
+                    latest_sha = new_commits[0]["sha"]
+                    if self._is_commit_already_notified(repo_key, latest_sha, all_groups):
+                        logger.info(f"仓库 {repo_key} 的提交 {latest_sha[:7]} 已经发送过通知，跳过")
+                    else:
+                        # 发送通知
+                        await self.notification_service.send_commit_notification(
+                            repo_info, new_commits, notification_targets, all_groups
+                        )
+                        # 标记为已发送
+                        self._mark_commit_as_notified(repo_key, latest_sha, all_groups)
+                        logger.info(f"已标记仓库 {repo_key} 的提交 {latest_sha[:7]} 为已通知")
 
                 # 更新数据
                 commit_data[repo_key] = new_commit  # 仍然只保存最新的提交SHA用于比较

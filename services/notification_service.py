@@ -199,12 +199,22 @@ class NotificationService:
         remaining_notifications = []
 
         for notification in failed_notifications:
+            notification_key = notification.get("key")
             targets = notification.get("targets", [])
             group_targets = notification.get("group_targets", [])
 
+            # 获取最新commit信息，检查是否已经发送过
+            repo_info = notification.get("repo_info", {})
+            new_commits = notification.get("new_commits", [])
+
+            # 检查是否已经在主发送记录中标记为已发送
+            if self._is_already_sent_in_main_record(repo_info, new_commits, targets, group_targets):
+                logger.info(f"通知 {notification_key} 已经在主记录中标记为已发送，跳过重试")
+                continue
+
             failed_targets, failed_group_targets = await self._send_notification_collect_failures(
-                notification["repo_info"],
-                notification["new_commits"],
+                repo_info,
+                new_commits,
                 targets,
                 group_targets,
             )
@@ -214,10 +224,88 @@ class NotificationService:
                 notification["group_targets"] = failed_group_targets
                 notification["attempts"] = int(notification.get("attempts", 0) or 0) + 1
                 remaining_notifications.append(notification)
+            else:
+                # 发送成功，标记为主已发送
+                self._mark_as_sent_in_main_record(repo_info, new_commits, targets, group_targets)
 
         # 保存仍然失败的通知
         self._save_failed_notifications(remaining_notifications)
         logger.info(f"重试后仍失败的通知数量: {len(remaining_notifications)}")
+
+    def _is_already_sent_in_main_record(self, repo_info: Dict, new_commits: List[Dict], targets: List[str], group_targets: List[str]) -> bool:
+        """检查通知是否已经在主发送记录中"""
+        try:
+            from astrbot.core.star import StarTools
+            plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
+            sent_file = os.path.join(plugin_data_dir, "sent_notifications.json")
+
+            if not os.path.exists(sent_file):
+                return False
+
+            with open(sent_file, 'r', encoding='utf-8') as f:
+                sent_data = json.load(f)
+
+            if not sent_data or not new_commits:
+                return False
+
+            owner = (repo_info.get("owner") or {}).get("login") or ""
+            repo = repo_info.get("name") or ""
+            repo_key = f"{owner}/{repo}"
+
+            latest_sha = new_commits[0].get("sha", "") if new_commits else ""
+            if not latest_sha:
+                return False
+
+            repo_sent_data = sent_data.get(repo_key, {})
+            commit_sent_data = repo_sent_data.get(latest_sha, [])
+
+            # 检查是否有任何记录包含当前的目标列表
+            target_set = set(str(t) for t in targets)
+            group_set = set(str(g) for g in group_targets)
+
+            for sent_groups in commit_sent_data:
+                sent_group_set = set(str(g) for g in sent_groups)
+                # 如果当前群组列表是已发送列表的子集，认为已发送
+                if group_set.issubset(sent_group_set):
+                    return True
+
+            return False
+        except Exception:
+            return False
+
+    def _mark_as_sent_in_main_record(self, repo_info: Dict, new_commits: List[Dict], targets: List[str], group_targets: List[str]):
+        """在主发送记录中标记为已发送"""
+        try:
+            from astrbot.core.star import StarTools
+            plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
+            sent_file = os.path.join(plugin_data_dir, "sent_notifications.json")
+
+            sent_data = {}
+            if os.path.exists(sent_file):
+                with open(sent_file, 'r', encoding='utf-8') as f:
+                    sent_data = json.load(f)
+
+            owner = (repo_info.get("owner") or {}).get("login") or ""
+            repo = repo_info.get("name") or ""
+            repo_key = f"{owner}/{repo}"
+
+            latest_sha = new_commits[0].get("sha", "") if new_commits else ""
+            if not latest_sha:
+                return
+
+            if repo_key not in sent_data:
+                sent_data[repo_key] = {}
+            if latest_sha not in sent_data[repo_key]:
+                sent_data[repo_key][latest_sha] = []
+
+            group_list = list(set(str(g) for g in group_targets))
+            if group_list and group_list not in sent_data[repo_key][latest_sha]:
+                sent_data[repo_key][latest_sha].append(group_list)
+
+            with open(sent_file, 'w', encoding='utf-8') as f:
+                json.dump(sent_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"标记通知为已发送失败: {str(e)}")
 
     async def send_commit_notification(self, repo_info: Dict, new_commits: List[Dict], targets: List[str],
                                        group_targets: List[str] = None):
