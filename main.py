@@ -14,7 +14,7 @@ from .services.notification_service import NotificationService, format_commit_da
 # 移除了 global_vars 的导入
 
 
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.4",
+@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.5",
           "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
@@ -193,9 +193,13 @@ class GitHubMonitorPlugin(Star):
                     # 获取从上次记录的提交之后的所有提交
                     commits_since = await self.github_service.get_commits_since(
                         owner, repo, old_commit.get("sha"), branch)
-                    if commits_since:
-                        new_commits = commits_since
-                    elif commits_since is None:
+                    if commits_since is not None:
+                        # 如果获取到了提交列表（可能为空），使用获取到的列表
+                        # 如果为空列表，说明没有新提交，但new_commit已经包含最新提交
+                        if commits_since:
+                            new_commits = commits_since
+                        # 如果commits_since为空列表，保持new_commits = [new_commit]
+                    else:
                         # API调用失败，跳过此仓库，但保留旧数据不变
                         continue
 

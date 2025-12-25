@@ -101,8 +101,12 @@ class GitHubService:
                 commits_data = response.json()
                 commits = []
 
-                # 收集从最新到since_sha之间的所有提交
+                # 收集从最新到since_sha之间的所有提交（不包含since_sha本身）
                 for commit_data in commits_data:
+                    # 如果到达了上次记录的commit，则停止（不包含这个commit）
+                    if commit_data["sha"] == since_sha:
+                        break
+                        
                     commit = {
                         "sha": commit_data["sha"],
                         "message": commit_data["commit"]["message"],
@@ -111,10 +115,6 @@ class GitHubService:
                         "url": commit_data["html_url"]
                     }
                     commits.append(commit)
-
-                    # 如果到达了上次记录的commit，则停止
-                    if commit_data["sha"] == since_sha:
-                        break
 
                 return commits
             elif response.status_code == 404:
