@@ -32,12 +32,34 @@ class NotificationService:
         self.failed_notifications_file = os.path.join(plugin_data_dir, "failed_notifications.json")
         self.time_zone = (config or {}).get("time_zone", "Asia/Shanghai")
         self.time_format = (config or {}).get("time_format", "%Y-%m-%d %H:%M:%S")
+        # 从配置中获取平台ID，如果未配置则自动查找aiocqhttp平台
+        self.platform_id = (config or {}).get("platform_id", None)
         self._ensure_data_dir()
 
     def _ensure_data_dir(self):
         """确保数据目录存在"""
         data_dir = os.path.dirname(self.failed_notifications_file)
         os.makedirs(data_dir, exist_ok=True)
+
+    def _get_platform_id(self, platform_type: str = "aiocqhttp") -> Optional[str]:
+        """获取平台的ID
+
+        Args:
+            platform_type: 平台类型名称，如 "aiocqhttp", "telegram"
+
+        Returns:
+            平台的ID，如果未找到则返回None
+        """
+        # 如果配置了platform_id，直接返回
+        if self.platform_id:
+            return self.platform_id
+
+        # 自动查找指定类型的平台
+        for platform in self.context.platform_manager.platform_insts:
+            meta = platform.meta()
+            if meta.name == platform_type:
+                return meta.id
+        return None
 
     def _load_failed_notifications(self) -> List:
         """加载发送失败的通知"""
@@ -439,19 +461,38 @@ class NotificationService:
         return message
 
     async def _send_private_message(self, user_id: int, message: str):
-        """通过 AstrBot 通用接口主动发送私聊消息"""
+        """通过 AstrBot 通用接口主动发送私聊消息
+
+        使用 MessageSession 构造会话对象，通过 StarTools.send_message 发送消息。
+        """
         try:
             user_id_str = str(user_id)
             if not user_id_str.isdigit():
                 error_msg = f"发送私聊消息失败: 非法的QQ号:{user_id_str}"
                 logger.error(error_msg)
                 return {"success": False, "message": error_msg}
-            message_chain = MessageChain().message(message)
-            await StarTools.send_message_by_id(
-                type="PrivateMessage",
-                id=user_id_str,
-                message_chain=message_chain,
+
+            # 获取平台ID
+            platform_id = self._get_platform_id("aiocqhttp")
+            if not platform_id:
+                error_msg = "发送私聊消息失败: 未找到aiocqhttp平台，请检查平台是否已启动或在配置中指定platform_id"
+                logger.error(error_msg)
+                return {"success": False, "message": error_msg}
+
+            # 构造私聊会话对象
+            session = MessageSesion(
+                platform_name=platform_id,
+                message_type=MessageType.FRIEND_MESSAGE,
+                session_id=user_id_str,
             )
+            message_chain = MessageChain().message(message)
+            sent = await StarTools.send_message(session, message_chain)
+
+            if not sent:
+                error_msg = f"发送私聊消息失败: 找不到平台 {platform_id}，请检查平台是否已启动"
+                logger.error(error_msg)
+                return {"success": False, "message": error_msg}
+
             logger.info(f"✅ 成功向 {user_id} 发送私聊消息")
             return {"success": True}
         except Exception as e:
@@ -466,11 +507,24 @@ class NotificationService:
             message_chain = MessageChain().message(message)
 
             if group_id_str.isdigit():
-                await StarTools.send_message_by_id(
-                    type="GroupMessage",
-                    id=group_id_str,
-                    message_chain=message_chain,
+                # 获取平台ID
+                platform_id = self._get_platform_id("aiocqhttp")
+                if not platform_id:
+                    error_msg = "发送群消息失败: 未找到aiocqhttp平台，请检查平台是否已启动或在配置中指定platform_id"
+                    logger.error(error_msg)
+                    return {"success": False, "message": error_msg}
+
+                # 构造 QQ 群会话对象
+                session = MessageSesion(
+                    platform_name=platform_id,
+                    message_type=MessageType.GROUP_MESSAGE,
+                    session_id=group_id_str,
                 )
+                sent = await StarTools.send_message(session, message_chain)
+                if not sent:
+                    error_msg = f"发送群消息失败: 找不到平台 {platform_id}，请检查平台是否已启动"
+                    logger.error(error_msg)
+                    return {"success": False, "message": error_msg}
                 logger.info(f"✅ 成功向 QQ 群 {group_id_str} 发送消息")
                 return {"success": True}
 
@@ -491,7 +545,11 @@ class NotificationService:
                     message_type=MessageType.GROUP_MESSAGE,
                     session_id=group_id_str,
                 )
-                await StarTools.send_message(session, message_chain)
+                sent = await StarTools.send_message(session, message_chain)
+                if not sent:
+                    error_msg = f"发送群消息失败: 找不到平台 {platform_id}"
+                    logger.error(error_msg)
+                    return {"success": False, "message": error_msg}
                 logger.info(f"✅ 成功向 Telegram 群 {group_id_str} 发送消息")
                 return {"success": True}
 
