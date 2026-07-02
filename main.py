@@ -10,12 +10,6 @@ from astrbot.core.star import StarTools
 from .services.github_service import GitHubService
 from .services.notification_service import NotificationService, format_commit_datetime
 
-
-# 移除了 global_vars 的导入
-
-
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.5",
-          "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
@@ -306,3 +300,79 @@ class GitHubMonitorPlugin(Star):
         except Exception as e:
             logger.error(f"获取状态失败: {str(e)}")
             yield event.plain_result(f"❌ 获取状态失败: {str(e)}")
+
+    @filter.command("github_issues")
+    async def issues_command(self, event: AstrMessageEvent):
+        """查询当前用户所有仓库的 open issues（需要配置 github_token）"""
+        try:
+            # 检查是否配置了 token
+            if not self.config.get("github_token"):
+                yield event.plain_result("⚠️ 请先在插件配置中填写 github_token，否则无法获取你的仓库列表")
+                return
+
+            # 获取当前认证用户信息
+            user = await self.github_service.get_current_user()
+            if not user:
+                yield event.plain_result("❌ 无法获取用户信息，请检查 github_token 是否有效")
+                return
+
+            username = user["login"]
+
+            # 分页获取用户所有仓库（/user/repos 认证接口，含私有仓库，type=owner 不含 fork）
+            all_repos = []
+            page = 1
+            while True:
+                repos = await self.github_service.get_user_repos(page=page, per_page=100)
+                if repos is None:
+                    yield event.plain_result(f"❌ 获取用户 {username} 的仓库列表失败")
+                    return
+                if not repos:
+                    break
+                all_repos.extend(repos)
+                if len(repos) < 100:
+                    break
+                page += 1
+
+            if not all_repos:
+                yield event.plain_result(f"✅ 用户 {username} 没有任何仓库")
+                return
+
+            message = f"📋 {username} 的 Open Issues\n\n"
+            total_issues = 0
+            repos_with_issues = 0
+
+            for repo in all_repos:
+                repo_name = repo["full_name"]
+
+                # 跳过没有 open issues 的仓库（利用 API 返回的计数快速过滤）
+                if repo.get("open_issues_count", 0) == 0:
+                    continue
+
+                # 获取该仓库的 open issues 详情
+                issues = await self.github_service.get_open_issues(repo["owner"]["login"], repo["name"])
+                if not issues:
+                    continue
+
+                # 确认有 issues 后才计数，避免计数与实际不一致
+                repos_with_issues += 1
+                message += f"📁 {repo_name}（{len(issues)} 个 open issues）\n"
+
+                for issue in issues:
+                    labels_str = ""
+                    if issue["labels"]:
+                        labels_str = f" 🏷️ {','.join(issue['labels'])}"
+                    message += f"  #{issue['number']} {issue['title']}{labels_str}\n"
+                    message += f"     👤 {issue['author']} | 🔗 {issue['url']}\n"
+                    total_issues += 1
+
+                message += "\n"
+
+            if repos_with_issues == 0:
+                yield event.plain_result(f"✅ {username} 的所有仓库均无 open issues（共 {len(all_repos)} 个仓库）")
+            else:
+                message += f"📊 共 {len(all_repos)} 个仓库，其中 {repos_with_issues} 个仓库有 open issues，共 {total_issues} 个"
+                yield event.plain_result(message)
+
+        except Exception as e:
+            logger.error(f"查询 issues 失败: {str(e)}")
+            yield event.plain_result(f"❌ 查询失败: {str(e)}")
