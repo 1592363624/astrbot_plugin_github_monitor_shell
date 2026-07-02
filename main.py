@@ -1,7 +1,9 @@
 import asyncio
 import json
 import os
+from datetime import datetime
 from typing import Dict, List
+from zoneinfo import ZoneInfo
 
 from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
@@ -9,7 +11,11 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.star import StarTools
 from .services.github_service import GitHubService
 from .services.notification_service import NotificationService, format_commit_datetime
+from .utils.cron_utils import cron_matches, get_next_run_time
 
+
+@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.6",
+          "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
@@ -19,10 +25,14 @@ class GitHubMonitorPlugin(Star):
         plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
         self.data_file = os.path.join(plugin_data_dir, "commits.json")
         self.sent_notifications_file = os.path.join(plugin_data_dir, "sent_notifications.json")
+        self.issues_snapshot_file = os.path.join(plugin_data_dir, "issues_snapshot.json")
+        self.issues_push_log_file = os.path.join(plugin_data_dir, "issues_push_log.json")
         self.monitoring_started = False  # 添加标志以跟踪监控是否已启动
         self._monitor_task: asyncio.Task | None = None
+        self._issues_cron_task: asyncio.Task | None = None  # Issues 定时推送任务
         self._ensure_data_dir()
         self._start_monitoring()
+        self._start_issues_cron_task()
 
     def _ensure_data_dir(self):
         """确保数据目录存在"""
@@ -67,6 +77,44 @@ class GitHubMonitorPlugin(Star):
         except Exception as e:
             logger.error(f"保存已发送通知记录失败: {str(e)}")
 
+    def _load_issues_snapshot(self) -> Dict:
+        """加载上次 issues 快照（用于对比变化）"""
+        try:
+            if os.path.exists(self.issues_snapshot_file):
+                with open(self.issues_snapshot_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            logger.error(f"加载 issues 快照失败: {str(e)}")
+            return {}
+
+    def _save_issues_snapshot(self, data: Dict):
+        """保存 issues 快照"""
+        try:
+            with open(self.issues_snapshot_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存 issues 快照失败: {str(e)}")
+
+    def _load_issues_push_log(self) -> Dict:
+        """加载推送日志（记录上次推送时间，用于间隔保护）"""
+        try:
+            if os.path.exists(self.issues_push_log_file):
+                with open(self.issues_push_log_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            logger.error(f"加载 issues 推送日志失败: {str(e)}")
+            return {}
+
+    def _save_issues_push_log(self, data: Dict):
+        """保存推送日志"""
+        try:
+            with open(self.issues_push_log_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存 issues 推送日志失败: {str(e)}")
+
     def _is_commit_already_notified(self, repo_key: str, commit_sha: str, groups: List[str]) -> bool:
         """检查commit是否已经发送过通知给这些群组"""
         sent_data = self._load_sent_notifications()
@@ -92,7 +140,238 @@ class GitHubMonitorPlugin(Star):
             self.monitoring_started = True
             logger.info("GitHub 监控任务已启动")
 
+    def _start_issues_cron_task(self):
+        """启动 Issues 定时推送任务（根据 cron 表达式）"""
+        if not self.config.get("issues_cron_enabled", False):
+            logger.info("Issues 定时推送未启用")
+            return
+
+        cron_expr = self.config.get("issues_cron_expression", "0 9 * * *")
+        run_desc = get_next_run_time(cron_expr, self.config.get("time_zone", "Asia/Shanghai"))
+        logger.info(f"Issues 定时推送已启动，Cron: {cron_expr}（{run_desc}）")
+        self._issues_cron_task = asyncio.create_task(self._issues_cron_loop())
+
+    async def _issues_cron_loop(self):
+        """Issues 定时推送循环：每分钟检查一次是否匹配 cron 表达式"""
+        cron_expr = self.config.get("issues_cron_expression", "0 9 * * *")
+        time_zone = self.config.get("time_zone", "Asia/Shanghai")
+        notification_targets = self.config.get("notification_targets", [])
+        group_targets = self.config.get("group_notification_targets", [])
+
+        while True:
+            try:
+                now = datetime.now(ZoneInfo("UTC"))
+                if cron_matches(cron_expr, now, time_zone):
+                    logger.info(f"触发 Issues 定时推送（Cron: {cron_expr}）")
+                    await self._send_issues_notification(notification_targets, group_targets)
+
+                # 每分钟检查一次
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Issues 定时推送循环出错: {str(e)}")
+                await asyncio.sleep(60)
+
+    async def _send_issues_notification(self, private_targets: List[str], group_targets: List[str] = None):
+        """查询所有仓库的 open issues，对比快照后推送变化内容
+
+        优化点：
+        1. 支持私聊 + 群聊双通道推送
+        2. 与上次快照对比，只推送新增/更新的 issue
+        3. 推送间隔保护：同一批 issue 不会在短时间内重复推送
+        """
+        if group_targets is None:
+            group_targets = []
+
+        try:
+            if not self.config.get("github_token"):
+                logger.warning("Issues 定时推送：未配置 github_token，跳过")
+                return
+
+            # 获取当前认证用户信息
+            user = await self.github_service.get_current_user()
+            if not user:
+                logger.error("Issues 定时推送：无法获取用户信息")
+                return
+
+            username = user["login"]
+
+            # 分页获取用户所有仓库
+            all_repos = []
+            page = 1
+            while True:
+                repos = await self.github_service.get_user_repos(page=page, per_page=100)
+                if repos is None:
+                    logger.error(f"Issues 定时推送：获取用户 {username} 的仓库列表失败")
+                    return
+                if not repos:
+                    break
+                all_repos.extend(repos)
+                if len(repos) < 100:
+                    break
+                page += 1
+
+            if not all_repos:
+                logger.info(f"Issues 定时推送：用户 {username} 没有任何仓库")
+                return
+
+            # 加载上次快照和推送日志
+            old_snapshot = self._load_issues_snapshot()
+            push_log = self._load_issues_push_log()
+
+            # 收集当前所有 open issues，构建新快照
+            # 快照结构: { "owner/repo": { "issue_number": { "title": ..., "updated_at": ... } } }
+            new_snapshot = {}
+            for repo in all_repos:
+                repo_name = repo["full_name"]
+                if repo.get("open_issues_count", 0) == 0:
+                    continue
+
+                issues = await self.github_service.get_open_issues(repo["owner"]["login"], repo["name"])
+                if not issues:
+                    continue
+
+                new_snapshot[repo_name] = {}
+                for issue in issues:
+                    new_snapshot[repo_name][str(issue["number"])] = {
+                        "title": issue["title"],
+                        "updated_at": issue["updated_at"],
+                        "author": issue["author"],
+                        "url": issue["url"],
+                        "labels": issue["labels"],
+                    }
+
+            # 对比快照，找出新增和更新的 issue
+            new_issues = {}  # 之前不存在的 issue
+            updated_issues = {}  # 之前存在但 updated_at 变化的 issue
+            for repo_name, issues in new_snapshot.items():
+                old_repo = old_snapshot.get(repo_name, {})
+                for issue_num, issue_data in issues.items():
+                    if issue_num not in old_repo:
+                        # 新增 issue
+                        if repo_name not in new_issues:
+                            new_issues[repo_name] = []
+                        new_issues[repo_name].append({
+                            "number": int(issue_num),
+                            "tag": "NEW",
+                            **issue_data,
+                        })
+                    elif issue_data["updated_at"] != old_repo[issue_num].get("updated_at", ""):
+                        # 更新的 issue
+                        if repo_name not in updated_issues:
+                            updated_issues[repo_name] = []
+                        updated_issues[repo_name].append({
+                            "number": int(issue_num),
+                            "tag": "UPDATED",
+                            **issue_data,
+                        })
+
+            # 保存新快照
+            self._save_issues_snapshot(new_snapshot)
+
+            # 如果没有变化，跳过推送
+            if not new_issues and not updated_issues:
+                logger.info("Issues 定时推送：与上次快照相比无变化，跳过推送")
+                return
+
+            # 间隔保护：生成内容指纹，检查是否在短时间内已推送过相同内容
+            content_fingerprint = self._build_issues_fingerprint(new_issues, updated_issues)
+            last_push_time = push_log.get(content_fingerprint, {}).get("time", "")
+            min_interval_minutes = self.config.get("issues_push_min_interval", 60)
+
+            if last_push_time:
+                try:
+                    last_dt = datetime.fromisoformat(last_push_time)
+                    elapsed = (datetime.now(ZoneInfo("UTC")) - last_dt).total_seconds() / 60
+                    if elapsed < min_interval_minutes:
+                        logger.info(
+                            f"Issues 定时推送：距上次推送仅 {elapsed:.0f} 分钟，"
+                            f"小于最小间隔 {min_interval_minutes} 分钟，跳过"
+                        )
+                        return
+                except Exception:
+                    pass
+
+            # 构建推送消息
+            message = "\U0001f4cb " + username + " 的 Issues 变更推送\n\n"
+            total_new = 0
+            total_updated = 0
+
+            if new_issues:
+                message += "\U0001f195 新增 Issues:\n\n"
+                for repo_name, issues in new_issues.items():
+                    message += "\U0001f4c1 " + repo_name + "\n"
+                    for issue in issues:
+                        labels_str = ""
+                        if issue.get("labels"):
+                            labels_str = " \U0001f3f7\ufe0f " + ",".join(issue["labels"])
+                        message += "  #" + str(issue["number"]) + " " + issue["title"] + labels_str + "\n"
+                        message += "     \U0001f464 " + issue["author"] + " | \U0001f517 " + issue["url"] + "\n"
+                        total_new += 1
+                    message += "\n"
+
+            if updated_issues:
+                message += "\U0001f504 更新 Issues:\n\n"
+                for repo_name, issues in updated_issues.items():
+                    message += "\U0001f4c1 " + repo_name + "\n"
+                    for issue in issues:
+                        labels_str = ""
+                        if issue.get("labels"):
+                            labels_str = " \U0001f3f7\ufe0f " + ",".join(issue["labels"])
+                        message += "  #" + str(issue["number"]) + " " + issue["title"] + labels_str + "\n"
+                        message += "     \U0001f464 " + issue["author"] + " | \U0001f517 " + issue["url"] + "\n"
+                        total_updated += 1
+                    message += "\n"
+
+            message += "\U0001f4ca 新增 " + str(total_new) + " 个，更新 " + str(total_updated) + " 个"
+
+            # 私聊推送
+            for target in private_targets:
+                try:
+                    result = await self.notification_service._send_private_message(int(target), message)
+                    if result.get("success", False):
+                        logger.info(f"Issues 定时推送：私聊成功发送给 {target}")
+                    else:
+                        logger.warning(f"Issues 定时推送：私聊发送给 {target} 失败")
+                except Exception as e:
+                    logger.error(f"Issues 定时推送：私聊发送给 {target} 出错: {str(e)}")
+
+            # 群聊推送
+            for group_id in group_targets:
+                try:
+                    result = await self.notification_service._send_group_message(int(group_id), message)
+                    if result.get("success", False):
+                        logger.info(f"Issues 定时推送：群消息成功发送给 {group_id}")
+                    else:
+                        logger.warning(f"Issues 定时推送：群消息发送给 {group_id} 失败")
+                except Exception as e:
+                    logger.error(f"Issues 定时推送：群消息发送给 {group_id} 出错: {str(e)}")
+
+            # 更新推送日志
+            push_log[content_fingerprint] = {
+                "time": datetime.now(ZoneInfo("UTC")).isoformat(),
+                "new_count": total_new,
+                "updated_count": total_updated,
+            }
+            self._save_issues_push_log(push_log)
+
+        except Exception as e:
+            logger.error(f"Issues 定时推送失败: {str(e)}")
+
+    def _build_issues_fingerprint(self, new_issues: Dict, updated_issues: Dict) -> str:
+        """根据新增和更新的 issue 生成内容指纹，用于间隔保护去重"""
+        parts = []
+        for repo_name, issues in sorted(new_issues.items()):
+            for issue in sorted(issues, key=lambda x: x["number"]):
+                parts.append(f"N:{repo_name}#{issue['number']}")
+        for repo_name, issues in sorted(updated_issues.items()):
+            for issue in sorted(issues, key=lambda x: x["number"]):
+                parts.append(f"U:{repo_name}#{issue['number']}")
+        return "|".join(parts)
+
     async def terminate(self):
+        # 取消 commit 监控任务
         if self._monitor_task and not self._monitor_task.done():
             self._monitor_task.cancel()
             try:
@@ -103,6 +382,17 @@ class GitHubMonitorPlugin(Star):
                 logger.warning(f"终止监控任务时出错: {str(e)}")
         self.monitoring_started = False
         self._monitor_task = None
+
+        # 取消 issues 定时推送任务
+        if self._issues_cron_task and not self._issues_cron_task.done():
+            self._issues_cron_task.cancel()
+            try:
+                await self._issues_cron_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning(f"终止 Issues 定时推送任务时出错: {str(e)}")
+        self._issues_cron_task = None
 
     async def _monitor_loop(self):
         """监控循环"""

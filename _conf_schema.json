@@ -38,5 +38,23 @@
     "description": "时间显示格式（Python strftime）",
     "default": "%Y-%m-%d %H:%M:%S",
     "hint": "例如: %Y-%m-%d %H:%M:%S"
+  },
+  "issues_cron_enabled": {
+    "type": "bool",
+    "description": "是否启用 Issues 定时推送",
+    "default": false,
+    "hint": "开启后，将按照 cron 表达式自动查询所有仓库的 open issues 并私聊发送给通知目标"
+  },
+  "issues_cron_expression": {
+    "type": "string",
+    "description": "Issues 定时推送的 Cron 表达式",
+    "default": "0 9 * * *",
+    "hint": "标准 5 段 Cron 表达式（分 时 日 月 周），例如: 0 9 * * * 表示每天 9:00 推送，0 9 * * 1-5 表示工作日 9:00 推送"
+  },
+  "issues_push_min_interval": {
+    "type": "int",
+    "description": "Issues 推送最小间隔（分钟）",
+    "default": 60,
+    "hint": "相同内容的推送不会在此间隔内重复发送，防止短时间内重复推送"
   }
 }
