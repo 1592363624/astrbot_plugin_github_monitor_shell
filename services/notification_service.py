@@ -26,13 +26,24 @@ def format_commit_datetime(
 
 
 class NotificationService:
+    """通知服务类，负责向不同平台发送GitHub更新通知
+
+    支持的QQ平台类型：
+    - aiocqhttp: OneBot v11 协议（NapCat/Lagrange等）
+    - qq_official: QQ官方API机器人
+    - qq_official_webhook: QQ官方Webhook机器人
+    """
+
+    # QQ系列平台类型列表，用于自动查找
+    QQ_PLATFORM_TYPES = ["aiocqhttp", "qq_official", "qq_official_webhook"]
+
     def __init__(self, context, config: Dict | None = None):
         self.context = context
         plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
         self.failed_notifications_file = os.path.join(plugin_data_dir, "failed_notifications.json")
         self.time_zone = (config or {}).get("time_zone", "Asia/Shanghai")
         self.time_format = (config or {}).get("time_format", "%Y-%m-%d %H:%M:%S")
-        # 从配置中获取平台ID，如果未配置则自动查找aiocqhttp平台
+        # 从配置中获取平台ID（高级选项），如果未配置则自动查找QQ系列平台
         self.platform_id = (config or {}).get("platform_id", None)
         self._ensure_data_dir()
 
@@ -41,24 +52,46 @@ class NotificationService:
         data_dir = os.path.dirname(self.failed_notifications_file)
         os.makedirs(data_dir, exist_ok=True)
 
-    def _get_platform_id(self, platform_type: str = "aiocqhttp") -> Optional[str]:
+    def _get_platform_id(self, platform_type: str = None) -> Optional[str]:
         """获取平台的ID
 
+        查找优先级：
+        1. 如果配置了 platform_id，直接使用（仅高级场景用）
+        2. 若调用方显式指定了 platform_type，则按指定类型查找
+        3. 自动查找 QQ 系列平台（aiocqhttp → qq_official → qq_official_webhook）
+
         Args:
-            platform_type: 平台类型名称，如 "aiocqhttp", "telegram"
+            platform_type: 调用方显式指定的平台类型名称，如 "telegram"。
+                          为 None 时直接按 QQ 系列平台自动检测。
 
         Returns:
             平台的ID，如果未找到则返回None
         """
-        # 如果配置了platform_id，直接返回
+        # 如果配置了platform_id，直接返回（最高优先级）
         if self.platform_id:
             return self.platform_id
 
-        # 自动查找指定类型的平台
-        for platform in self.context.platform_manager.platform_insts:
-            meta = platform.meta()
-            if meta.name == platform_type:
-                return meta.id
+        # 确定要查找的平台类型列表
+        if platform_type:
+            # 调用方显式指定了类型（如 Telegram 专用分支）
+            search_types = [platform_type]
+        else:
+            # 自动检测：按优先级顺序查找所有QQ系列平台
+            search_types = self.QQ_PLATFORM_TYPES
+
+        # 在已注册的平台实例中查找
+        for search_type in search_types:
+            for platform in self.context.platform_manager.platform_insts:
+                meta = platform.meta()
+                if meta.name == search_type:
+                    logger.info(f"自动检测到平台: {search_type} (ID: {meta.id})")
+                    return meta.id
+
+        # 未找到时输出调试信息
+        available_platforms = [p.meta().name for p in self.context.platform_manager.platform_insts]
+        logger.warning(
+            f"未找到匹配的平台。查找类型: {search_types}，当前可用平台: {available_platforms}"
+        )
         return None
 
     def _load_failed_notifications(self) -> List:
@@ -464,6 +497,7 @@ class NotificationService:
         """通过 AstrBot 通用接口主动发送私聊消息
 
         使用 MessageSession 构造会话对象，通过 StarTools.send_message 发送消息。
+        支持 aiocqhttp / qq_official / qq_official_webhook 等QQ系列平台。
         """
         try:
             user_id_str = str(user_id)
@@ -472,10 +506,14 @@ class NotificationService:
                 logger.error(error_msg)
                 return {"success": False, "message": error_msg}
 
-            # 获取平台ID
-            platform_id = self._get_platform_id("aiocqhttp")
+            # 获取平台ID（自动检测 QQ 系列平台或使用配置指定的类型
+            platform_id = self._get_platform_id()
             if not platform_id:
-                error_msg = "发送私聊消息失败: 未找到aiocqhttp平台，请检查平台是否已启动或在配置中指定platform_id"
+                error_msg = (
+                    "发送私聊消息失败: 未找到QQ平台实例。"
+                    "请确保已启动 aiocqhttp / qq_official / qq_official_webhook 平台之一，"
+                    "或在配置中指定 platform_id / platform_type"
+                )
                 logger.error(error_msg)
                 return {"success": False, "message": error_msg}
 
@@ -501,16 +539,26 @@ class NotificationService:
             return {"success": False, "message": error_msg}
 
     async def _send_group_message(self, group_id: int, message: str):
-        """通过 AstrBot 通用接口主动发送群消息"""
+        """通过 AstrBot 通用接口主动发送群消息
+
+        支持的群类型：
+        - 纯数字群号: QQ系列平台（aiocqhttp / qq_official / qq_official_webhook）
+        - 以 "-" 开头的ID: Telegram 群组
+        """
         try:
             group_id_str = str(group_id)
             message_chain = MessageChain().message(message)
 
             if group_id_str.isdigit():
-                # 获取平台ID
-                platform_id = self._get_platform_id("aiocqhttp")
+                # QQ系列群（纯数字群号）
+                # 自动检测 QQ 系列平台：aiocqhttp / qq_official / qq_official_webhook
+                platform_id = self._get_platform_id()
                 if not platform_id:
-                    error_msg = "发送群消息失败: 未找到aiocqhttp平台，请检查平台是否已启动或在配置中指定platform_id"
+                    error_msg = (
+                        "发送群消息失败: 未找到QQ平台实例。"
+                        "请确保已启动 aiocqhttp / qq_official / qq_official_webhook 平台之一，"
+                        "或在配置中指定 platform_id / platform_type"
+                    )
                     logger.error(error_msg)
                     return {"success": False, "message": error_msg}
 
@@ -529,6 +577,7 @@ class NotificationService:
                 return {"success": True}
 
             if group_id_str.startswith("-"):
+                # Telegram 群组（以负号开头的 chat_id）
                 platform_id = None
                 for platform in self.context.platform_manager.platform_insts:
                     meta = platform.meta()

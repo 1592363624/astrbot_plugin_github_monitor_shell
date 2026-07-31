@@ -27,6 +27,12 @@
     "default": [],
     "hint": "所有仓库更新时都会通知这些群组，如果需要为特定仓库配置额外的群组，请在仓库配置中指定"
   },
+  "platform_id": {
+    "type": "string",
+    "description": "指定平台ID（高级选项，留空则自动匹配）",
+    "default": "",
+    "hint": "仅当配置了多个同类型平台时需要手动指定，通常留空即可。留空时会按 aiocqhttp → qq_official → qq_official_webhook 的优先级自动检测可用的QQ平台。"
+  },
   "time_zone": {
     "type": "string",
     "description": "时间显示时区（IANA 标准名称）",

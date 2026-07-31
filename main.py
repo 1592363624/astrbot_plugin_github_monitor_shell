@@ -14,8 +14,6 @@ from .services.notification_service import NotificationService, format_commit_da
 from .utils.cron_utils import cron_matches, get_next_run_time
 
 
-@register("GitHub监控插件", "Shell", "定时监控GitHub仓库commit变化并发送通知", "1.2.6",
-          "https://github.com/1592363624/astrbot_plugin_github_monitor_shell")
 class GitHubMonitorPlugin(Star):
     def __init__(self, context: Context, config=None):
         super().__init__(context)
