@@ -62,5 +62,82 @@
     "description": "Issues 推送最小间隔（分钟）",
     "default": 60,
     "hint": "相同内容的推送不会在此间隔内重复发送，防止短时间内重复推送"
+  },
+  "image_output": {
+    "type": "object",
+    "description": "文转图（图片通知）",
+    "hint": "将 commit 更新通知渲染为图片卡片发送，依赖 AstrBot 的文转图（T2I）服务",
+    "items": {
+      "commit_output_format": {
+        "type": "string",
+        "description": "Commit 通知输出格式",
+        "options": ["text", "image"],
+        "default": "text",
+        "hint": "text 为纯文本通知；image 会将 commit 更新渲染为图片卡片发送，渲染或发送失败的通知会进入重试队列自动重试"
+      },
+      "commit_image_template": {
+        "type": "string",
+        "description": "Commit 卡片图片模板",
+        "options": ["random", "terminal", "github_dark", "light", "retro_term", "miku", "sakura"],
+        "default": "terminal",
+        "hint": "内置主题：terminal 终端风 / github_dark GitHub暗色 / light 简洁浅色 / retro_term 复古绿屏 / miku 初音风 / sakura 樱花粉；选 random 则每次推送随机使用一套。也可以在插件数据目录的 templates/ 下放置自定义 .html 模板，文件名（不含后缀）即模板名，直接填在这里即可使用（自定义模板也会进入 random 的随机池）"
+      },
+      "enable_base64_image": {
+        "type": "bool",
+        "description": "图片传输使用 Base64 编码",
+        "default": true,
+        "hint": "启用后图片以 Base64 编码传输；关闭后将传递本地临时文件路径给平台适配器。某些 OneBot 实现端与 AstrBot 分离部署时需要开启"
+      },
+      "t2i_image_type": {
+        "type": "string",
+        "description": "图片格式",
+        "options": ["png", "jpeg"],
+        "default": "png",
+        "hint": "PNG 无损但体积较大；JPEG 体积较小"
+      },
+      "t2i_quality": {
+        "type": "int",
+        "description": "图片质量（仅 JPEG 生效）",
+        "default": 90,
+        "slider": {"min": 1, "max": 100, "step": 1}
+      },
+      "t2i_scale": {
+        "type": "string",
+        "description": "图片清晰度等级",
+        "options": ["normal", "high", "ultra"],
+        "default": "high",
+        "hint": "normal=1.0x, high=1.3x, ultra=1.8x。等级越高图片越清晰，渲染越慢"
+      },
+      "enable_group_file_upload": {
+        "type": "bool",
+        "description": "上传图片到群文件",
+        "default": false,
+        "hint": "开启后，图片通知发送成功时会将图片备份上传到群文件（仅 OneBot/aiocqhttp 平台的 QQ 群生效）"
+      },
+      "group_file_folder": {
+        "type": "string",
+        "description": "群文件目标文件夹名",
+        "default": "",
+        "hint": "留空则上传到群文件根目录；填写文件夹名时会自动查找，不存在则创建"
+      },
+      "enable_group_album_upload": {
+        "type": "bool",
+        "description": "上传图片到群相册",
+        "default": false,
+        "hint": "此功能为 NapCat 扩展 API，其他 OneBot 实现可能不支持"
+      },
+      "group_album_name": {
+        "type": "string",
+        "description": "群相册名称",
+        "default": "",
+        "hint": "上传到指定名称的相册；留空时使用相册列表中的第一个"
+      },
+      "group_album_strict_mode": {
+        "type": "bool",
+        "description": "群相册严格模式",
+        "default": true,
+        "hint": "开启后，找不到指定名称的相册时放弃上传，防止误传到默认相册；关闭后回退到相册列表第一个"
+      }
+    }
   }
 }

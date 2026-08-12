@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=520, height=10">
+<title>{{ title or 'GitHub 仓库更新通知' }}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 520px;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f6f8fa;
+    padding: 12px;
+  }
+  .card {
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-left: 4px solid #0969da;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e1e4e8;
+  }
+  .title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .title-text { color: #24292f; font-size: 15px; font-weight: 600; }
+  .count-text { color: #57606a; font-size: 12px; flex-shrink: 0; }
+  .sub-row {
+    margin-top: 4px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .repo-link { color: #0969da; text-decoration: none; font-weight: 600; }
+  .branch-tag {
+    display: inline-block;
+    background: #ddf4ff;
+    color: #0969da;
+    border-radius: 999px;
+    padding: 0 10px;
+    font-size: 12px;
+    font-family: Consolas, "Courier New", monospace;
+  }
+  .commit {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    border-bottom: 1px solid #e1e4e8;
+    font-size: 13px;
+  }
+  .commit:last-of-type { border-bottom: none; }
+  .sha-box {
+    flex-shrink: 0;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+  .sha-box a { color: #0969da; text-decoration: none; }
+  .sha-box { color: #0969da; }
+  .main-wrap { flex: 1; min-width: 0; }
+  .message { color: #24292f; word-break: break-all; }
+  .author { color: #57606a; font-size: 12px; margin-top: 1px; }
+  .time {
+    flex-shrink: 0;
+    color: #57606a;
+    font-size: 12px;
+    text-align: right;
+    align-self: flex-start;
+    padding-top: 2px;
+  }
+  .empty {
+    padding: 14px 16px;
+    color: #57606a;
+    font-size: 13px;
+  }
+  .footer {
+    padding: 8px 16px;
+    border-top: 1px solid #e1e4e8;
+    background: #f6f8fa;
+    color: #57606a;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <div class="title-row">
+      <span class="title-text">{{ title or 'GitHub 仓库更新通知' }}</span>
+      <span class="count-text">共 {{ commit_count or 0 }} 个新提交</span>
+    </div>
+    <div class="sub-row">
+      <a class="repo-link" href="{{ repo_url or '#' }}">{{ repo_name or '未知仓库' }}</a>
+      {% if branch %}<span class="branch-tag">{{ branch }}</span>{% endif %}
+    </div>
+  </div>
+  {% for c in commits %}
+  <div class="commit">
+    <span class="sha-box">{% if c.url %}<a href="{{ c.url }}">{{ c.sha_short or '-------' }}</a>{% else %}{{ c.sha_short or '-------' }}{% endif %}</span>
+    <div class="main-wrap">
+      <div class="message">{{ c.message or '(无提交信息)' }}</div>
+      <div class="author">{{ c.author or '未知作者' }}</div>
+    </div>
+    <span class="time">{{ c.time or '' }}</span>
+  </div>
+  {% else %}
+  <div class="empty">暂无新提交</div>
+  {% endfor %}
+  <div class="footer">更新时间：{{ generated_at or '未知' }}</div>
+</div>
+</body>
+</html>

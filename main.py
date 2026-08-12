@@ -10,7 +10,11 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star import StarTools
 from .services.github_service import GitHubService
+from .services.group_upload_service import GroupUploadService
+from .services.image_render_service import ImageRenderService
 from .services.notification_service import NotificationService, format_commit_datetime
+from .services.onebot_direct import OneBotDirectSender
+from .services.template_manager import TemplateManager
 from .utils.cron_utils import cron_matches, get_next_run_time
 
 
@@ -19,8 +23,24 @@ class GitHubMonitorPlugin(Star):
         super().__init__(context)
         self.config = config or {}
         self.github_service = GitHubService(self.config.get("github_token", ""))
-        self.notification_service = NotificationService(context, self.config)
         plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
+        # 文转图相关服务（模板目录：插件内置 templates/ + 数据目录自定义 templates/）
+        template_manager = TemplateManager(
+            builtin_dir=os.path.join(os.path.dirname(__file__), "templates"),
+            custom_dir=os.path.join(plugin_data_dir, "templates"),
+        )
+        image_service = ImageRenderService(
+            template_manager, self.html_render, self.config
+        )
+        upload_service = GroupUploadService(context, self.config)
+        image_cfg = self.config.get("image_output", {}) or {}
+        onebot_sender = OneBotDirectSender(
+            context, enable_base64=bool(image_cfg.get("enable_base64_image", True))
+        )
+        self.notification_service = NotificationService(
+            context, self.config, image_service=image_service,
+            upload_service=upload_service, onebot_sender=onebot_sender,
+        )
         self.data_file = os.path.join(plugin_data_dir, "commits.json")
         self.sent_notifications_file = os.path.join(plugin_data_dir, "sent_notifications.json")
         self.issues_snapshot_file = os.path.join(plugin_data_dir, "issues_snapshot.json")
@@ -412,6 +432,7 @@ class GitHubMonitorPlugin(Star):
 
         commit_data = self._load_commit_data()
         notification_targets = self.config.get("notification_targets", [])
+        updated_count = 0
         
         # 创建当前配置中的仓库键集合，用于清理已删除的仓库数据
         configured_repo_keys = set()
@@ -467,6 +488,7 @@ class GitHubMonitorPlugin(Star):
 
             # 检查是否有变化
             if not old_commit or old_commit.get("sha") != new_commit["sha"]:
+                updated_count += 1
                 logger.info(f"检测到仓库 {repo_key} 有新的commit: {new_commit['sha'][:7]}")
 
                 # 获取所有新的提交
@@ -498,7 +520,8 @@ class GitHubMonitorPlugin(Star):
                     else:
                         # 发送通知
                         await self.notification_service.send_commit_notification(
-                            repo_info, new_commits, notification_targets, all_groups
+                            repo_info, new_commits, notification_targets, all_groups,
+                            branch=actual_branch,
                         )
                         # 标记为已发送
                         self._mark_commit_as_notified(repo_key, latest_sha, all_groups)
@@ -507,7 +530,9 @@ class GitHubMonitorPlugin(Star):
                 # 更新数据
                 commit_data[repo_key] = new_commit  # 仍然只保存最新的提交SHA用于比较
                 self._save_commit_data(commit_data)
-                
+            else:
+                logger.info(f"仓库 {repo_key} 无新commit（最新 {new_commit['sha'][:7]}）")
+
         # 清理已删除仓库的数据
         removed_keys = set(commit_data.keys()) - configured_repo_keys
         for removed_key in removed_keys:
@@ -515,6 +540,10 @@ class GitHubMonitorPlugin(Star):
             logger.info(f"已清理已删除仓库的数据: {removed_key}")
         if removed_keys:
             self._save_commit_data(commit_data)
+
+        logger.info(
+            f"本轮检查完成：共 {len(configured_repo_keys)} 个仓库，{updated_count} 个有更新"
+        )
 
     @filter.command("github_monitor")
     async def monitor_command(self, event: AstrMessageEvent):

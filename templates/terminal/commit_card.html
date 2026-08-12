@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=520, height=10">
+<title>{{ title or 'GitHub 仓库更新通知' }}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 520px;
+    font-family: Consolas, "Courier New", "Microsoft YaHei", monospace;
+    background: linear-gradient(135deg, #2d2d2d 0%, #1a1a1a 100%);
+    padding: 16px;
+  }
+  .window {
+    background: rgba(30, 30, 30, 0.96);
+    border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+  .titlebar {
+    background: #2d2d2d;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+  }
+  .dots { display: flex; gap: 8px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.red { background: #ff5f57; }
+  .dot.yellow { background: #febc2e; }
+  .dot.green { background: #28c840; }
+  .win-title {
+    flex: 1;
+    text-align: center;
+    color: #9a9a9a;
+    font-size: 13px;
+  }
+  .win-title .spacer { width: 44px; }
+  .term-body { padding: 14px 16px; }
+  .cmd-line { color: #d4d4d4; font-size: 13px; margin-bottom: 4px; }
+  .cmd-line .prompt { color: #28c840; font-weight: bold; }
+  .repo-comment { color: #28c840; font-size: 13px; margin-bottom: 12px; }
+  .repo-comment a { color: #28c840; text-decoration: none; }
+  .branch-tag {
+    display: inline-block;
+    color: #61afef;
+    background: rgba(97, 175, 239, 0.12);
+    border: 1px solid rgba(97, 175, 239, 0.4);
+    border-radius: 4px;
+    padding: 0 6px;
+    font-size: 11px;
+    margin-left: 8px;
+  }
+  .head-info {
+    color: #8a8a8a;
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+  .head-info .title-text { color: #c678dd; }
+  .commit { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 13px; line-height: 1.5; }
+  .sha { color: #e5c07b; flex-shrink: 0; }
+  .sha a { color: #e5c07b; text-decoration: none; }
+  .message { color: #f0f0f0; flex: 1; min-width: 0; word-break: break-word; overflow-wrap: anywhere; }
+  .meta { flex-shrink: 0; font-size: 11px; }
+  .author { color: #56b6c2; }
+  .time { color: #6a6a6a; margin-left: 8px; }
+  .empty { color: #6a6a6a; font-size: 13px; padding: 6px 0; }
+  .footer {
+    border-top: 1px solid #3a3a3a;
+    margin-top: 12px;
+    padding-top: 8px;
+    color: #5a5a5a;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="dots">
+      <span class="dot red"></span>
+      <span class="dot yellow"></span>
+      <span class="dot green"></span>
+    </div>
+    <div class="win-title">git log</div>
+    <span class="spacer"></span>
+  </div>
+  <div class="term-body">
+    <div class="cmd-line"><span class="prompt">$</span> git log --oneline</div>
+    <div class="repo-comment">
+      # <a href="{{ repo_url or '#' }}">{{ repo_name or '未知仓库' }}</a>{% if branch %}<span class="branch-tag">{{ branch }}</span>{% endif %}
+    </div>
+    <div class="head-info">
+      <span class="title-text">{{ title or 'GitHub 仓库更新通知' }}</span> · 新增 {{ commit_count or 0 }} 个提交
+    </div>
+    {% for c in commits %}
+    <div class="commit">
+      <span class="sha">{% if c.url %}<a href="{{ c.url }}">{{ c.sha_short or '-------' }}</a>{% else %}{{ c.sha_short or '-------' }}{% endif %}</span>
+      <span class="message">{{ c.message or '(无提交信息)' }}</span>
+      <span class="meta"><span class="author">{{ c.author or '未知作者' }}</span><span class="time">{{ c.time or '' }}</span></span>
+    </div>
+    {% else %}
+    <div class="empty">（暂无新提交）</div>
+    {% endfor %}
+    <div class="footer">更新时间：{{ generated_at or '未知' }}</div>
+  </div>
+</div>
+</body>
+</html>
