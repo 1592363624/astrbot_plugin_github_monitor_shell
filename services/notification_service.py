@@ -1,28 +1,20 @@
+import base64
 import json
 import os
+import uuid
 from datetime import datetime
 from typing import List, Dict, Optional
-from zoneinfo import ZoneInfo
 
+import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.platform import MessageType
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.star import StarTools
 
+from ..utils.time_utils import format_commit_datetime
 
-def format_commit_datetime(
-    date_str: str,
-    time_zone: str,
-    time_format: str,
-) -> Optional[str]:
-    try:
-        normalized = date_str.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(normalized)
-        target_tz = ZoneInfo(time_zone)
-        return dt.astimezone(target_tz).strftime(time_format)
-    except Exception:
-        return None
+__all__ = ["NotificationService", "format_commit_datetime"]
 
 
 class NotificationService:
@@ -37,14 +29,21 @@ class NotificationService:
     # QQ系列平台类型列表，用于自动查找
     QQ_PLATFORM_TYPES = ["aiocqhttp", "qq_official", "qq_official_webhook"]
 
-    def __init__(self, context, config: Dict | None = None):
+    def __init__(self, context, config: Dict | None = None, image_service=None, upload_service=None, onebot_sender=None):
         self.context = context
-        plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
-        self.failed_notifications_file = os.path.join(plugin_data_dir, "failed_notifications.json")
+        self.image_service = image_service
+        self.upload_service = upload_service
+        self.onebot_sender = onebot_sender
+        self.plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
+        self.failed_notifications_file = os.path.join(self.plugin_data_dir, "failed_notifications.json")
         self.time_zone = (config or {}).get("time_zone", "Asia/Shanghai")
         self.time_format = (config or {}).get("time_format", "%Y-%m-%d %H:%M:%S")
         # 从配置中获取平台ID（高级选项），如果未配置则自动查找QQ系列平台
         self.platform_id = (config or {}).get("platform_id", None)
+        # 文转图相关配置（image_output 分组）
+        image_cfg = (config or {}).get("image_output", {}) or {}
+        self.commit_output_format = image_cfg.get("commit_output_format", "text")
+        self.enable_base64_image = bool(image_cfg.get("enable_base64_image", True))
         self._ensure_data_dir()
 
     def _ensure_data_dir(self):
@@ -136,6 +135,7 @@ class NotificationService:
                 "new_commits": new_commits,
                 "targets": self._normalize_target_list(targets),
                 "group_targets": self._normalize_target_list(group_targets),
+                "branch": n.get("branch"),
             }
             item["key"] = n.get("key") or self._build_notification_key(repo_info, new_commits)
             item["attempts"] = int(n.get("attempts", 0) or 0)
@@ -272,6 +272,7 @@ class NotificationService:
                 new_commits,
                 targets,
                 group_targets,
+                branch=notification.get("branch"),
             )
 
             if failed_targets or failed_group_targets:
@@ -363,7 +364,7 @@ class NotificationService:
             logger.error(f"标记通知为已发送失败: {str(e)}")
 
     async def send_commit_notification(self, repo_info: Dict, new_commits: List[Dict], targets: List[str],
-                                       group_targets: List[str] = None):
+                                       group_targets: List[str] = None, branch: str = None):
         """发送commit变更通知"""
         # 检查是否有有效的提交
         if not new_commits:
@@ -376,6 +377,7 @@ class NotificationService:
                 new_commits,
                 targets,
                 group_targets,
+                branch=branch,
             )
 
             if failed_targets or failed_group_targets:
@@ -386,6 +388,7 @@ class NotificationService:
                         "new_commits": new_commits,
                         "targets": failed_targets,
                         "group_targets": failed_group_targets,
+                        "branch": branch,
                         "key": self._build_notification_key(repo_info, new_commits),
                         "attempts": 1,
                         "created_at": datetime.utcnow().isoformat(),
@@ -404,6 +407,7 @@ class NotificationService:
                         "new_commits": new_commits,
                         "targets": self._normalize_target_list(targets),
                         "group_targets": self._normalize_target_list(group_targets),
+                        "branch": branch,
                         "key": self._build_notification_key(repo_info, new_commits),
                         "attempts": 1,
                         "created_at": datetime.utcnow().isoformat(),
@@ -420,32 +424,154 @@ class NotificationService:
         new_commits: List[Dict],
         targets,
         group_targets=None,
+        branch: str = None,
     ) -> tuple[List[str], List[str]]:
         try:
-            message = self._format_commit_message(repo_info, new_commits)
+            text_message = self._format_commit_message(repo_info, new_commits)
+            message: str | MessageChain = text_message
+            image_b64: Optional[str] = None
+            temp_image_path: Optional[str] = None
+
+            # 文转图模式：渲染 commit 卡片（渲染一次，所有目标复用）
+            if self.commit_output_format == "image":
+                if not self.image_service:
+                    logger.error("文转图服务未注入，无法渲染 commit 卡片")
+                else:
+                    try:
+                        image_b64 = await self.image_service.render_commit_image(
+                            repo_info, new_commits, branch
+                        )
+                    except Exception as e:
+                        logger.error(f"渲染 commit 卡片图片失败: {str(e)}")
+                if image_b64:
+                    temp_image_path = self._write_temp_image(image_b64)
+                    message = self._build_image_chain(image_b64, temp_image_path)
+                else:
+                    # 渲染失败：不发送任何内容，所有目标计入失败，交由重试队列下轮重试
+                    logger.error("commit 卡片图片渲染失败，本次通知未发送，将进入重试队列")
+                    return (
+                        self._normalize_target_list(targets),
+                        self._normalize_target_list(group_targets),
+                    )
+
             failed_targets: List[str] = []
             failed_group_targets: List[str] = []
 
-            for target in self._merge_unique(self._normalize_target_list(targets), []):
-                try:
-                    result = await self._send_private_message(int(target), message)
-                    if not result.get("success", False):
+            try:
+                for target in self._merge_unique(self._normalize_target_list(targets), []):
+                    try:
+                        result = await self._send_to_target(
+                            target, False, message, image_b64, temp_image_path
+                        )
+                        if not result.get("success", False):
+                            failed_targets.append(target)
+                    except Exception:
                         failed_targets.append(target)
-                except Exception:
-                    failed_targets.append(target)
 
-            for group_target in self._merge_unique(self._normalize_target_list(group_targets), []):
-                try:
-                    result = await self._send_group_message(int(group_target), message)
-                    if not result.get("success", False):
+                for group_target in self._merge_unique(self._normalize_target_list(group_targets), []):
+                    try:
+                        result = await self._send_to_target(
+                            group_target, True, message, image_b64, temp_image_path
+                        )
+                        image_sent = bool(image_b64 and result.get("success", False))
+                        if not result.get("success", False):
+                            failed_group_targets.append(group_target)
+                        elif (
+                            image_sent
+                            and self.upload_service
+                            and str(group_target).isdigit()
+                        ):
+                            # 图片通知发送成功后，按配置备份上传到群文件/群相册
+                            try:
+                                await self.upload_service.maybe_upload(
+                                    group_target,
+                                    image_b64,
+                                    self._build_image_filename(repo_info, new_commits),
+                                )
+                            except Exception as e:
+                                logger.error(f"群文件/相册上传出错: {str(e)}")
+                    except Exception:
                         failed_group_targets.append(group_target)
-                except Exception:
-                    failed_group_targets.append(group_target)
+            finally:
+                if temp_image_path:
+                    try:
+                        os.remove(temp_image_path)
+                    except OSError:
+                        pass
 
+            total_p = len(self._normalize_target_list(targets))
+            total_g = len(self._normalize_target_list(group_targets))
+            logger.info(
+                f"通知发送完成：私聊 {total_p - len(failed_targets)}/{total_p} 成功，"
+                f"群 {total_g - len(failed_group_targets)}/{total_g} 成功"
+            )
             return failed_targets, failed_group_targets
         except Exception as e:
             logger.error(f"发送通知时发生异常: {str(e)}")
             return self._normalize_target_list(targets), self._normalize_target_list(group_targets)
+
+    async def _send_to_target(
+        self,
+        target: str,
+        is_group: bool,
+        message,
+        image_b64: Optional[str],
+        temp_image_path: Optional[str],
+    ):
+        """发送通知到单个目标。
+
+        图片模式下，QQ 数字目标使用 OneBot 直发；非 OneBot 环境
+        （其他平台、Telegram 群等）使用 StarTools 消息链通道。
+        """
+        if (
+            image_b64
+            and temp_image_path
+            and self.onebot_sender
+            and str(target).isdigit()
+        ):
+            try:
+                direct_ok = await self.onebot_sender.send_image(
+                    str(target), image_b64, temp_image_path, is_group=is_group
+                )
+            except Exception as e:
+                logger.error(f"OneBot 直发图片出错: {str(e)}")
+                direct_ok = False
+            if direct_ok is not None:
+                return {"success": direct_ok}
+
+        if is_group:
+            return await self._send_group_message(int(target), message)
+        return await self._send_private_message(int(target), message)
+
+    def _write_temp_image(self, image_b64: str) -> str:
+        """把 base64 图片写入数据目录的临时文件，返回文件路径（由调用方发送后清理）"""
+        temp_dir = os.path.join(self.plugin_data_dir, "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_path = os.path.join(temp_dir, f"commit_card_{uuid.uuid4().hex}.png")
+        with open(temp_path, "wb") as f:
+            f.write(base64.b64decode(image_b64))
+        return temp_path
+
+    def _build_image_chain(self, image_b64: str, temp_path: str) -> MessageChain:
+        """根据配置构建图片消息链（StarTools 通道使用）。
+
+        优先使用 Base64；关闭 Base64 或当前 AstrBot 版本不支持 fromBase64 时，
+        使用临时文件 + fromFileSystem。注意：经 StarTools 发送时 AstrBot 会将
+        Image 段统一转为 base64://，该配置只在 OneBot 直发通道下影响传输模式。
+        """
+        from_base64 = getattr(Comp.Image, "fromBase64", None)
+        if self.enable_base64_image and callable(from_base64):
+            return MessageChain(chain=[from_base64(image_b64)])
+        return MessageChain(chain=[Comp.Image.fromFileSystem(temp_path)])
+
+    @staticmethod
+    def _build_image_filename(repo_info: Dict, new_commits: List[Dict]) -> str:
+        owner = (repo_info.get("owner") or {}).get("login") or "unknown"
+        repo = repo_info.get("name") or "unknown"
+        sha = (new_commits[0].get("sha") or "")[:7] if new_commits else ""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        suffix = f"_{sha}" if sha else ""
+        return f"github_commit_{owner}_{repo}{suffix}_{timestamp}.png"
 
     def _format_commit_message(self, repo_info: Dict, new_commits: List[Dict]) -> str:
         """格式化commit消息"""
@@ -493,11 +619,19 @@ class NotificationService:
 
         return message
 
-    async def _send_private_message(self, user_id: int, message: str):
+    @staticmethod
+    def _to_message_chain(message) -> MessageChain:
+        """str 转为纯文本消息链，MessageChain 原样返回"""
+        if isinstance(message, MessageChain):
+            return message
+        return MessageChain().message(message)
+
+    async def _send_private_message(self, user_id: int, message):
         """通过 AstrBot 通用接口主动发送私聊消息
 
         使用 MessageSession 构造会话对象，通过 StarTools.send_message 发送消息。
         支持 aiocqhttp / qq_official / qq_official_webhook 等QQ系列平台。
+        message 支持纯文本 str 或 MessageChain（如图片消息）。
         """
         try:
             user_id_str = str(user_id)
@@ -523,7 +657,7 @@ class NotificationService:
                 message_type=MessageType.FRIEND_MESSAGE,
                 session_id=user_id_str,
             )
-            message_chain = MessageChain().message(message)
+            message_chain = self._to_message_chain(message)
             sent = await StarTools.send_message(session, message_chain)
 
             if not sent:
@@ -538,16 +672,17 @@ class NotificationService:
             logger.error(error_msg, exc_info=True)
             return {"success": False, "message": error_msg}
 
-    async def _send_group_message(self, group_id: int, message: str):
+    async def _send_group_message(self, group_id: int, message):
         """通过 AstrBot 通用接口主动发送群消息
 
         支持的群类型：
         - 纯数字群号: QQ系列平台（aiocqhttp / qq_official / qq_official_webhook）
         - 以 "-" 开头的ID: Telegram 群组
+        message 支持纯文本 str 或 MessageChain（如图片消息）。
         """
         try:
             group_id_str = str(group_id)
-            message_chain = MessageChain().message(message)
+            message_chain = self._to_message_chain(message)
 
             if group_id_str.isdigit():
                 # QQ系列群（纯数字群号）
