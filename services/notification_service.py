@@ -12,6 +12,7 @@ from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform.astr_message_event import MessageSesion
 from astrbot.core.star import StarTools
 
+from ..utils.config_utils import parse_repo_config_item
 from ..utils.time_utils import format_commit_datetime
 
 __all__ = ["NotificationService", "format_commit_datetime"]
@@ -212,7 +213,8 @@ class NotificationService:
                 repo_info = notification.get("repo_info", {})
 
                 # 检查仓库是否仍在配置中
-                for repo_config in repositories:
+                for raw_repo_config in repositories:
+                    repo_config = parse_repo_config_item(raw_repo_config)
                     if isinstance(repo_config, str):
                         # 字符串格式: "owner/repo|group1|group2|..."
                         parts = repo_config.split("|")

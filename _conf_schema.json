@@ -11,6 +11,12 @@
     "default": [],
     "hint": "例如:1592363624/astrbot_plugin_github_monitor_shell|123456|91219736 或 {\"owner\": \"1592363624\", \"repo\": \"astrbot_plugin_github_monitor_shell\", \"groups\": [\"123456\", \"91219736\"]}"
   },
+  "target_branches": {
+    "type": "list",
+    "description": "指定目标分支（全局）",
+    "default": [],
+    "hint": "填写分支名列表（如 [\"dev\",\"arch\"]）后，所有监控仓库都会逐一监控这些分支；留空则使用各仓库的默认分支（或仓库配置里指定的 branch）。"
+  },
   "check_interval": {
     "type": "int",
     "description": "检查间隔（分钟）",

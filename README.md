@@ -25,6 +25,7 @@
 
 除了原有的配置项，现在还支持：
 
+- `target_branches`: 指定目标分支（分支名列表），如 `["dev", "arch"]`。填写后所有监控仓库都会逐一监控这些分支（每个分支独立记录、独立推送）；留空则使用各仓库的默认分支（或仓库配置里指定的 `branch`）
 - `group_notification_targets`: 群通知目标（群号列表），可以将通知发送到指定的群聊中
 - `time_zone`: 时间显示时区（默认 `Asia/Shanghai`，即可显示为北京时间）
 - `time_format`: 时间显示格式，使用 Python `strftime` 语法，默认 `%Y-%m-%d %H:%M:%S`
