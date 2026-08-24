@@ -344,10 +344,10 @@ class GitHubMonitorPlugin(Star):
 
             message += "\U0001f4ca 新增 " + str(total_new) + " 个，更新 " + str(total_updated) + " 个"
 
-            # 私聊推送
+            # 私聊推送（目标支持纯数字QQ号或 UMO 格式：平台ID:FriendMessage:会话ID）
             for target in private_targets:
                 try:
-                    result = await self.notification_service._send_private_message(int(target), message)
+                    result = await self.notification_service._send_private_message(str(target), message)
                     if result.get("success", False):
                         logger.info(f"Issues 定时推送：私聊成功发送给 {target}")
                     else:
@@ -355,10 +355,10 @@ class GitHubMonitorPlugin(Star):
                 except Exception as e:
                     logger.error(f"Issues 定时推送：私聊发送给 {target} 出错: {str(e)}")
 
-            # 群聊推送
+            # 群聊推送（目标支持纯数字群号或 UMO 格式：平台ID:GroupMessage:会话ID）
             for group_id in group_targets:
                 try:
-                    result = await self.notification_service._send_group_message(int(group_id), message)
+                    result = await self.notification_service._send_group_message(str(group_id), message)
                     if result.get("success", False):
                         logger.info(f"Issues 定时推送：群消息成功发送给 {group_id}")
                     else:

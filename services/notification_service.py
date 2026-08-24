@@ -24,6 +24,13 @@ class NotificationService:
     - aiocqhttp: OneBot v11 协议（NapCat/Lagrange等）
     - qq_official: QQ官方API机器人
     - qq_official_webhook: QQ官方Webhook机器人
+
+    推送目标支持两种格式：
+    - 传统格式：纯数字群号/QQ号（自动匹配QQ系列平台）、"-"开头的Telegram群ID
+    - UMO（unified_msg_origin，推荐）：平台ID:消息类型:会话ID，如
+      aiocqhttp:GroupMessage:123456 或
+      小爱同学:GroupMessage:0771687B325FC423AD9F4C06A88D84E3
+      平台无关且自带路由信息，适配QQ官方机器人的非数字openid、多bot/多平台场景
     """
 
     # QQ系列平台类型列表，用于自动查找
@@ -92,6 +99,67 @@ class NotificationService:
             f"未找到匹配的平台。查找类型: {search_types}，当前可用平台: {available_platforms}"
         )
         return None
+
+    @staticmethod
+    def _parse_umo(target: str) -> Optional[MessageSesion]:
+        """尝试把目标字符串解析为 UMO（unified_msg_origin）。
+
+        格式: 平台ID:消息类型:会话ID，例如:
+        - aiocqhttp:GroupMessage:123456
+        - 小爱同学:GroupMessage:0771687B325FC423AD9F4C06A88D84E3
+        - qq_official:FriendMessage:ABCDEF0123456789
+
+        解析失败（格式不符 / 消息类型非法）返回 None，由调用方回退到传统目标格式。
+        """
+        if not isinstance(target, str) or target.count(":") < 2:
+            return None
+        try:
+            session = MessageSesion.from_str(target)
+        except Exception:
+            return None
+        if not isinstance(session.message_type, MessageType):
+            return None
+        return session
+
+    def _is_platform_of_type(self, platform_id: str, platform_type: str) -> bool:
+        """检查指定平台ID的实例是否为给定平台类型（如 aiocqhttp）"""
+        try:
+            for platform in self.context.platform_manager.platform_insts:
+                meta = platform.meta()
+                if meta.id == platform_id:
+                    return meta.name == platform_type
+        except Exception as e:
+            logger.debug(f"检查平台类型时出错: {str(e)}")
+        return False
+
+    def _resolve_onebot_digit_id(
+        self, target: str, session: Optional[MessageSesion] = None
+    ) -> Optional[str]:
+        """若目标可经 OneBot 直发（数字ID且能确定是 aiocqhttp 平台），返回数字ID，否则返回 None"""
+        if session is not None:
+            if session.session_id.isdigit() and self._is_platform_of_type(
+                session.platform_name, "aiocqhttp"
+            ):
+                return session.session_id
+            return None
+        target_str = str(target).strip()
+        return target_str if target_str.isdigit() else None
+
+    async def _send_by_session(self, session: MessageSesion, message, target_desc: str = ""):
+        """通过已构造好的会话对象发送消息（StarTools 通道，平台无关）"""
+        try:
+            message_chain = self._to_message_chain(message)
+            sent = await StarTools.send_message(session, message_chain)
+            if not sent:
+                error_msg = f"发送消息失败: 找不到平台 {session.platform_name}，请检查平台是否已启动"
+                logger.error(error_msg)
+                return {"success": False, "message": error_msg}
+            logger.info(f"✅ 成功向 {target_desc or session.session_id} 发送消息")
+            return {"success": True}
+        except Exception as e:
+            error_msg = f"发送消息失败: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {"success": False, "message": error_msg}
 
     def _load_failed_notifications(self) -> List:
         """加载发送失败的通知"""
@@ -474,17 +542,18 @@ class NotificationService:
                             group_target, True, message, image_b64, temp_image_path
                         )
                         image_sent = bool(image_b64 and result.get("success", False))
+                        upload_id = (
+                            self._resolve_onebot_digit_id(group_target)
+                            if image_sent and self.upload_service
+                            else None
+                        )
                         if not result.get("success", False):
                             failed_group_targets.append(group_target)
-                        elif (
-                            image_sent
-                            and self.upload_service
-                            and str(group_target).isdigit()
-                        ):
+                        elif upload_id is not None:
                             # 图片通知发送成功后，按配置备份上传到群文件/群相册
                             try:
                                 await self.upload_service.maybe_upload(
-                                    group_target,
+                                    upload_id,
                                     image_b64,
                                     self._build_image_filename(repo_info, new_commits),
                                 )
@@ -520,28 +589,38 @@ class NotificationService:
     ):
         """发送通知到单个目标。
 
-        图片模式下，QQ 数字目标使用 OneBot 直发；非 OneBot 环境
+        支持的目标格式：
+        - UMO（平台ID:消息类型:会话ID，推荐，平台无关，如QQ官方机器人的openid场景）
+        - 纯数字群号/QQ号：自动匹配QQ系列平台
+        - 以 "-" 开头的ID：Telegram 群组
+
+        图片模式下，aiocqhttp 平台的数字目标使用 OneBot 直发；其余情况
         （其他平台、Telegram 群等）使用 StarTools 消息链通道。
         """
-        if (
-            image_b64
-            and temp_image_path
-            and self.onebot_sender
-            and str(target).isdigit()
-        ):
-            try:
-                direct_ok = await self.onebot_sender.send_image(
-                    str(target), image_b64, temp_image_path, is_group=is_group
-                )
-            except Exception as e:
-                logger.error(f"OneBot 直发图片出错: {str(e)}")
-                direct_ok = False
-            if direct_ok is not None:
-                return {"success": direct_ok}
+        target_str = str(target).strip()
+        session = self._parse_umo(target_str)
+
+        # 图片优先尝试 OneBot 直发通道（仅限数字ID且能确定是 aiocqhttp 平台）
+        if image_b64 and temp_image_path and self.onebot_sender:
+            direct_id = self._resolve_onebot_digit_id(target_str, session)
+            if direct_id is not None:
+                try:
+                    direct_ok = await self.onebot_sender.send_image(
+                        direct_id, image_b64, temp_image_path, is_group=is_group
+                    )
+                except Exception as e:
+                    logger.error(f"OneBot 直发图片出错: {str(e)}")
+                    direct_ok = False
+                if direct_ok is not None:
+                    return {"success": direct_ok}
+
+        # UMO 目标自带平台与会话类型信息，直接路由发送
+        if session is not None:
+            return await self._send_by_session(session, message, target_desc=target_str)
 
         if is_group:
-            return await self._send_group_message(int(target), message)
-        return await self._send_private_message(int(target), message)
+            return await self._send_group_message(target_str, message)
+        return await self._send_private_message(target_str, message)
 
     def _write_temp_image(self, image_b64: str) -> str:
         """把 base64 图片写入数据目录的临时文件，返回文件路径（由调用方发送后清理）"""
@@ -626,21 +705,25 @@ class NotificationService:
             return message
         return MessageChain().message(message)
 
-    async def _send_private_message(self, user_id: int, message):
+    async def _send_private_message(self, user_id, message):
         """通过 AstrBot 通用接口主动发送私聊消息
 
         使用 MessageSession 构造会话对象，通过 StarTools.send_message 发送消息。
         支持 aiocqhttp / qq_official / qq_official_webhook 等QQ系列平台。
+        支持的目标格式：
+        - UMO: 平台ID:FriendMessage:会话ID（推荐，平台无关，多bot场景可用）
+        - 纯数字QQ号 / 非数字会话ID（如QQ官方机器人的十六进制openid，自动匹配QQ系列平台）
         message 支持纯文本 str 或 MessageChain（如图片消息）。
         """
         try:
-            user_id_str = str(user_id)
-            if not user_id_str.isdigit():
-                error_msg = f"发送私聊消息失败: 非法的QQ号:{user_id_str}"
-                logger.error(error_msg)
-                return {"success": False, "message": error_msg}
+            user_id_str = str(user_id).strip()
 
-            # 获取平台ID（自动检测 QQ 系列平台或使用配置指定的类型
+            # UMO 格式：自带平台与会话类型信息，直接路由发送
+            session = self._parse_umo(user_id_str)
+            if session is not None:
+                return await self._send_by_session(session, message, target_desc=user_id_str)
+
+            # 获取平台ID（自动检测 QQ 系列平台或使用配置指定的类型）
             platform_id = self._get_platform_id()
             if not platform_id:
                 error_msg = (
@@ -665,51 +748,30 @@ class NotificationService:
                 logger.error(error_msg)
                 return {"success": False, "message": error_msg}
 
-            logger.info(f"✅ 成功向 {user_id} 发送私聊消息")
+            logger.info(f"✅ 成功向 {user_id_str} 发送私聊消息")
             return {"success": True}
         except Exception as e:
             error_msg = f"发送私聊消息失败: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return {"success": False, "message": error_msg}
 
-    async def _send_group_message(self, group_id: int, message):
+    async def _send_group_message(self, group_id, message):
         """通过 AstrBot 通用接口主动发送群消息
 
-        支持的群类型：
-        - 纯数字群号: QQ系列平台（aiocqhttp / qq_official / qq_official_webhook）
+        支持的群目标格式：
+        - UMO: 平台ID:GroupMessage:会话ID（推荐，平台无关，多bot场景可用）
+        - 纯数字群号: 自动匹配QQ系列平台（aiocqhttp / qq_official / qq_official_webhook）
         - 以 "-" 开头的ID: Telegram 群组
+        - 其他非数字会话ID（如QQ官方机器人的十六进制openid）: 自动匹配QQ系列平台
         message 支持纯文本 str 或 MessageChain（如图片消息）。
         """
         try:
-            group_id_str = str(group_id)
-            message_chain = self._to_message_chain(message)
+            group_id_str = str(group_id).strip()
 
-            if group_id_str.isdigit():
-                # QQ系列群（纯数字群号）
-                # 自动检测 QQ 系列平台：aiocqhttp / qq_official / qq_official_webhook
-                platform_id = self._get_platform_id()
-                if not platform_id:
-                    error_msg = (
-                        "发送群消息失败: 未找到QQ平台实例。"
-                        "请确保已启动 aiocqhttp / qq_official / qq_official_webhook 平台之一，"
-                        "或在配置中指定 platform_id / platform_type"
-                    )
-                    logger.error(error_msg)
-                    return {"success": False, "message": error_msg}
-
-                # 构造 QQ 群会话对象
-                session = MessageSesion(
-                    platform_name=platform_id,
-                    message_type=MessageType.GROUP_MESSAGE,
-                    session_id=group_id_str,
-                )
-                sent = await StarTools.send_message(session, message_chain)
-                if not sent:
-                    error_msg = f"发送群消息失败: 找不到平台 {platform_id}，请检查平台是否已启动"
-                    logger.error(error_msg)
-                    return {"success": False, "message": error_msg}
-                logger.info(f"✅ 成功向 QQ 群 {group_id_str} 发送消息")
-                return {"success": True}
+            # UMO 格式：自带平台与会话类型信息，直接路由发送
+            session = self._parse_umo(group_id_str)
+            if session is not None:
+                return await self._send_by_session(session, message, target_desc=group_id_str)
 
             if group_id_str.startswith("-"):
                 # Telegram 群组（以负号开头的 chat_id）
@@ -729,7 +791,7 @@ class NotificationService:
                     message_type=MessageType.GROUP_MESSAGE,
                     session_id=group_id_str,
                 )
-                sent = await StarTools.send_message(session, message_chain)
+                sent = await StarTools.send_message(session, self._to_message_chain(message))
                 if not sent:
                     error_msg = f"发送群消息失败: 找不到平台 {platform_id}"
                     logger.error(error_msg)
@@ -737,9 +799,31 @@ class NotificationService:
                 logger.info(f"✅ 成功向 Telegram 群 {group_id_str} 发送消息")
                 return {"success": True}
 
-            error_msg = f"发送群消息失败: 非法的群标识:{group_id_str}"
-            logger.error(error_msg)
-            return {"success": False, "message": error_msg}
+            # QQ系列群：纯数字群号，或其他非数字会话ID（如QQ官方机器人的openid）
+            # 自动检测 QQ 系列平台：aiocqhttp / qq_official / qq_official_webhook
+            platform_id = self._get_platform_id()
+            if not platform_id:
+                error_msg = (
+                    "发送群消息失败: 未找到QQ平台实例。"
+                    "请确保已启动 aiocqhttp / qq_official / qq_official_webhook 平台之一，"
+                    "或在配置中指定 platform_id / platform_type"
+                )
+                logger.error(error_msg)
+                return {"success": False, "message": error_msg}
+
+            # 构造 QQ 群会话对象
+            session = MessageSesion(
+                platform_name=platform_id,
+                message_type=MessageType.GROUP_MESSAGE,
+                session_id=group_id_str,
+            )
+            sent = await StarTools.send_message(session, self._to_message_chain(message))
+            if not sent:
+                error_msg = f"发送群消息失败: 找不到平台 {platform_id}，请检查平台是否已启动"
+                logger.error(error_msg)
+                return {"success": False, "message": error_msg}
+            logger.info(f"✅ 成功向 QQ 群 {group_id_str} 发送消息")
+            return {"success": True}
         except Exception as e:
             error_msg = f"发送群消息失败: {str(e)}"
             logger.error(error_msg, exc_info=True)

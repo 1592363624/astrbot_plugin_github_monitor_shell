@@ -2,6 +2,15 @@
 
 所有 noteworthy 的插件更新都会记录在此文件中。
 
+## \[1.3.5] - 2026-08-24
+
+### Fixed
+
+- 修复 QQ 官方机器人（qq_official / qq_official_webhook）无法作为主动推送目标的问题：移除推送链路中对群号/QQ号的纯数字硬校验（`int()` / `isdigit()`），十六进制 openid 等非数字会话ID不再被误判为非法
+- 新增 UMO（unified_msg_origin）格式推送目标支持：`平台ID:消息类型:会话ID`，如 `aiocqhttp:GroupMessage:123456`、`小爱同学:GroupMessage:0771687B325FC423AD9F4C06A88D84E3`，适配多 bot / 多平台场景，可明确指定由哪个平台的哪个会话接收推送
+- 向后兼容：纯数字群号/QQ号及 "-" 开头的 Telegram 群ID继续按原有逻辑处理；Issues 定时推送同步适配
+- 图片通知的 OneBot 直发通道兼容 UMO 目标（平台为 aiocqhttp 且会话为数字ID时仍走直发）
+
 ## \[1.3.4] - 2026-08-12
 
 ### Added

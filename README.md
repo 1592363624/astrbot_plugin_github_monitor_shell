@@ -25,9 +25,30 @@
 
 除了原有的配置项，现在还支持：
 
-- `group_notification_targets`: 群通知目标（群号列表），可以将通知发送到指定的群聊中
+- `group_notification_targets`: 群通知目标，可以将通知发送到指定的群聊中
 - `time_zone`: 时间显示时区（默认 `Asia/Shanghai`，即可显示为北京时间）
 - `time_format`: 时间显示格式，使用 Python `strftime` 语法，默认 `%Y-%m-%d %H:%M:%S`
+
+## 推送目标格式
+
+`notification_targets`（私聊）、`group_notification_targets`（群聊）以及仓库配置中的 `groups` 支持两种格式：
+
+### 传统格式
+
+- 纯数字群号/QQ号，如 `123456`，自动匹配QQ系列平台（aiocqhttp / qq_official / qq_official_webhook）
+- 以 `-` 开头的ID：Telegram 群组
+
+### UMO 格式（推荐）
+
+`平台ID:消息类型:会话ID`，平台无关且自带路由信息：
+
+```
+aiocqhttp:GroupMessage:123456
+小爱同学:GroupMessage:0771687B325FC423AD9F4C06A88D84E3
+qq_official:FriendMessage:0771687B325FC423AD9F4C06A88D84E3
+```
+
+QQ 官方机器人（qq_official / qq_official_webhook）没有传统数字群号/QQ号，只有一串十六进制的 openid 会话ID，必须使用 UMO 格式（或直接填写 openid，单平台部署时会自动匹配）。配置了多个 bot/平台时，UMO 可以明确指定由哪个平台的哪个会话接收推送。
 
 ## 仓库配置增强功能
 
