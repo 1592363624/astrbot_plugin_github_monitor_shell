@@ -50,6 +50,8 @@ qq_official:FriendMessage:0771687B325FC423AD9F4C06A88D84E3
 
 QQ 官方机器人（qq_official / qq_official_webhook）没有传统数字群号/QQ号，只有一串十六进制的 openid 会话ID，必须使用 UMO 格式（或直接填写 openid，单平台部署时会自动匹配）。配置了多个 bot/平台时，UMO 可以明确指定由哪个平台的哪个会话接收推送。
 
+> 自动匹配行为：直接填写目标 ID（不写 UMO）时，插件会按 ID 特征自动选择平台——纯数字 ID 优先匹配 aiocqhttp（OneBot）；非数字 ID（官方bot的十六进制 openid）优先匹配 qq_official / qq_official_webhook。因此即使多平台同时运行，直接填 openid 也能正确路由到官方 bot，无需手动关闭其他适配器。
+
 ## 仓库配置增强功能
 
 现在支持为每个仓库单独配置通知群组：

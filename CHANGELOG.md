@@ -2,6 +2,13 @@
 
 所有 noteworthy 的插件更新都会记录在此文件中。
 
+## \[1.3.6] - 2026-08-25
+
+### Fixed
+
+- 修复多平台同时运行时，直接填写官方 bot 的 openid（非数字会话ID）作为推送目标会被固定优先级自动检测误路由到 aiocqhttp 导致发送失败的问题：自动检测现按目标 ID 特征智能选平台——纯数字 ID → aiocqhttp 优先；非数字 ID（官方bot的十六进制 openid）→ qq_official / qq_official_webhook 优先，无需手动关闭其他适配器
+- 修复 UMO 消息类型仅兼容枚举值（`GroupMessage`）的问题：现同时兼容枚举名（`GROUP_MESSAGE`），避免复制到枚举名时解析失败而静默回退自动检测
+
 ## \[1.3.5] - 2026-08-24
 
 ### Fixed

@@ -58,17 +58,21 @@ class NotificationService:
         data_dir = os.path.dirname(self.failed_notifications_file)
         os.makedirs(data_dir, exist_ok=True)
 
-    def _get_platform_id(self, platform_type: str = None) -> Optional[str]:
+    def _get_platform_id(self, platform_type: str = None, target: str = None) -> Optional[str]:
         """获取平台的ID
 
         查找优先级：
         1. 如果配置了 platform_id，直接使用（仅高级场景用）
         2. 若调用方显式指定了 platform_type，则按指定类型查找
-        3. 自动查找 QQ 系列平台（aiocqhttp → qq_official → qq_official_webhook）
+        3. 自动查找 QQ 系列平台。多平台同时运行时按目标ID特征决定顺序：
+           - 纯数字目标（传统QQ号/群号）→ aiocqhttp → qq_official → qq_official_webhook
+           - 非数字目标（官方bot的十六进制openid）→ qq_official → qq_official_webhook → aiocqhttp
+             官方bot没有数字QQ号/群号，非数字ID塞给 aiocqhttp 必然失败，故官方平台优先。
 
         Args:
             platform_type: 调用方显式指定的平台类型名称，如 "telegram"。
-                          为 None 时直接按 QQ 系列平台自动检测。
+                          为 None 时按 QQ 系列平台自动检测。
+            target: 推送目标字符串，用于按ID特征（数字/非数字）智能选择平台。
 
         Returns:
             平台的ID，如果未找到则返回None
@@ -82,8 +86,16 @@ class NotificationService:
             # 调用方显式指定了类型（如 Telegram 专用分支）
             search_types = [platform_type]
         else:
-            # 自动检测：按优先级顺序查找所有QQ系列平台
-            search_types = self.QQ_PLATFORM_TYPES
+            # 自动检测：根据目标ID特征决定QQ平台查找顺序
+            # 官方bot（qq_official / qq_official_webhook）没有数字群号/QQ号，
+            # 目标为非数字（如十六进制 openid）时应优先官方平台，而不是 aiocqhttp
+            target_str = str(target or "").strip().lstrip("-")
+            if target_str.isdigit():
+                # 纯数字目标：OneBot（aiocqhttp）优先
+                search_types = ["aiocqhttp", "qq_official", "qq_official_webhook"]
+            else:
+                # 非数字目标（openid等）：官方平台优先
+                search_types = ["qq_official", "qq_official_webhook", "aiocqhttp"]
 
         # 在已注册的平台实例中查找
         for search_type in search_types:
@@ -106,20 +118,32 @@ class NotificationService:
 
         格式: 平台ID:消息类型:会话ID，例如:
         - aiocqhttp:GroupMessage:123456
-        - 小爱同学:GroupMessage:0771687B325FC423AD9F4C06A88D84E3
+        - 小祥²:GroupMessage:0771687B325FC423AD9F4C06A88D84E3
         - qq_official:FriendMessage:ABCDEF0123456789
+
+        消息类型同时兼容枚举值（GroupMessage）与枚举名（GROUP_MESSAGE），
+        避免用户在 WebUI 复制到枚举名时解析失败而静默回退到自动检测。
 
         解析失败（格式不符 / 消息类型非法）返回 None，由调用方回退到传统目标格式。
         """
         if not isinstance(target, str) or target.count(":") < 2:
             return None
+        platform_id, message_type_str, session_id = target.split(":", 2)
+        # 消息类型兼容：先按枚举值（GroupMessage）解析，失败再按枚举名（GROUP_MESSAGE）解析
         try:
-            session = MessageSesion.from_str(target)
-        except Exception:
+            message_type = MessageType(message_type_str)
+        except ValueError:
+            try:
+                message_type = MessageType[message_type_str]
+            except (KeyError, ValueError, TypeError):
+                return None
+        if not isinstance(message_type, MessageType):
             return None
-        if not isinstance(session.message_type, MessageType):
-            return None
-        return session
+        return MessageSesion(
+            platform_name=platform_id,
+            message_type=message_type,
+            session_id=session_id,
+        )
 
     def _is_platform_of_type(self, platform_id: str, platform_type: str) -> bool:
         """检查指定平台ID的实例是否为给定平台类型（如 aiocqhttp）"""
@@ -723,8 +747,8 @@ class NotificationService:
             if session is not None:
                 return await self._send_by_session(session, message, target_desc=user_id_str)
 
-            # 获取平台ID（自动检测 QQ 系列平台或使用配置指定的类型）
-            platform_id = self._get_platform_id()
+            # 获取平台ID（自动检测 QQ 系列平台，按目标ID特征智能选择，或使用配置指定的类型）
+            platform_id = self._get_platform_id(target=user_id_str)
             if not platform_id:
                 error_msg = (
                     "发送私聊消息失败: 未找到QQ平台实例。"
@@ -800,8 +824,8 @@ class NotificationService:
                 return {"success": True}
 
             # QQ系列群：纯数字群号，或其他非数字会话ID（如QQ官方机器人的openid）
-            # 自动检测 QQ 系列平台：aiocqhttp / qq_official / qq_official_webhook
-            platform_id = self._get_platform_id()
+            # 自动检测 QQ 系列平台，按目标ID特征智能选择（非数字openid → 官方平台优先）
+            platform_id = self._get_platform_id(target=group_id_str)
             if not platform_id:
                 error_msg = (
                     "发送群消息失败: 未找到QQ平台实例。"
