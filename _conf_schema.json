@@ -46,6 +46,12 @@
     "default": "%Y-%m-%d %H:%M:%S",
     "hint": "例如: %Y-%m-%d %H:%M:%S"
   },
+  "issue_monitor_enabled": {
+    "type": "bool",
+    "description": "是否监控项目仓库的 Issues 动态",
+    "default": true,
+    "hint": "开启后，随每次仓库检查一同检测上方配置的监控仓库的 Issues：有新增 Issue、或 Issue 下出现新评论（讨论变化）时立即推送通知，推送目标与 Commit 通知一致"
+  },
   "issues_cron_enabled": {
     "type": "bool",
     "description": "是否启用 Issues 定时推送",

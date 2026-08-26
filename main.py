@@ -45,6 +45,7 @@ class GitHubMonitorPlugin(Star):
         self.sent_notifications_file = os.path.join(plugin_data_dir, "sent_notifications.json")
         self.issues_snapshot_file = os.path.join(plugin_data_dir, "issues_snapshot.json")
         self.issues_push_log_file = os.path.join(plugin_data_dir, "issues_push_log.json")
+        self.repo_issues_state_file = os.path.join(plugin_data_dir, "repo_issues_state.json")
         self.monitoring_started = False  # 添加标志以跟踪监控是否已启动
         self._monitor_task: asyncio.Task | None = None
         self._issues_cron_task: asyncio.Task | None = None  # Issues 定时推送任务
@@ -132,6 +133,31 @@ class GitHubMonitorPlugin(Star):
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"保存 issues 推送日志失败: {str(e)}")
+
+    def _load_repo_issues_state(self) -> Dict:
+        """加载项目仓库 Issues 动态监控状态
+
+        结构: { "owner/repo": { "issue_number": {
+            "title": ..., "author": ..., "url": ...,
+            "labels": [...], "updated_at": ..., "comments": n, "last_comment_at": ...
+        } } }
+        """
+        try:
+            if os.path.exists(self.repo_issues_state_file):
+                with open(self.repo_issues_state_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            logger.error(f"加载项目仓库 Issues 状态失败: {str(e)}")
+            return {}
+
+    def _save_repo_issues_state(self, data: Dict):
+        """保存项目仓库 Issues 动态监控状态"""
+        try:
+            with open(self.repo_issues_state_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存项目仓库 Issues 状态失败: {str(e)}")
 
     def _is_commit_already_notified(self, repo_key: str, commit_sha: str, groups: List[str]) -> bool:
         """检查commit是否已经发送过通知给这些群组"""
@@ -479,6 +505,13 @@ class GitHubMonitorPlugin(Star):
             # 将当前仓库键添加到配置集合中
             configured_repo_keys.add(repo_key)
 
+            # Issues 动态监控：检测该项目仓库的新 Issue 及 Issue 下的新讨论
+            if self.config.get("issue_monitor_enabled", True):
+                try:
+                    await self._check_repo_issues(owner, repo, extra_groups)
+                except Exception as e:
+                    logger.error(f"检查仓库 {owner}/{repo} 的 Issues 失败: {str(e)}")
+
             # 获取最新commit
             new_commit = await self.github_service.get_latest_commit(owner, repo, branch)
             if not new_commit:
@@ -544,6 +577,147 @@ class GitHubMonitorPlugin(Star):
         logger.info(
             f"本轮检查完成：共 {len(configured_repo_keys)} 个仓库，{updated_count} 个有更新"
         )
+
+    async def _check_repo_issues(self, owner: str, repo: str, extra_groups: List[str] = None):
+        """检测单个项目仓库的 Issues 动态
+
+        - 有新增 Issue 时推送通知
+        - 已有 Issue 出现新讨论变化（新增评论、标题/正文/标签更新等）时推送通知，
+          新增评论会附带评论者与内容摘要
+        - 首次监控某仓库时仅建立基线快照，不推送，避免刷屏
+        """
+        if extra_groups is None:
+            extra_groups = []
+
+        repo_name = f"{owner}/{repo}"
+        issues = await self.github_service.get_open_issues(owner, repo)
+        if issues is None:
+            logger.warning(f"Issues 动态监控：获取 {repo_name} 的 issues 失败，本轮跳过")
+            return
+
+        state = self._load_repo_issues_state()
+        old_repo_state = state.get(repo_name)
+        first_run = old_repo_state is None  # 该仓库首次纳入监控，只建基线不推送
+
+        new_snapshot = {}
+        new_issues = []       # 新增的 issue
+        updated_issues = []   # 有动态的 issue，元素: {"issue": {...}, "new_comments": [...]}
+
+        for issue in issues:
+            num = str(issue["number"])
+            entry = {
+                "title": issue["title"],
+                "author": issue["author"],
+                "url": issue["url"],
+                "labels": issue["labels"],
+                "updated_at": issue["updated_at"],
+                "comments": issue.get("comments", 0),
+            }
+            new_snapshot[num] = entry
+
+            if first_run:
+                continue
+
+            old = old_repo_state.get(num)
+            if old is None:
+                new_issues.append({**entry, "number": issue["number"]})
+                continue
+
+            comment_added = issue.get("comments", 0) > old.get("comments", 0)
+            content_changed = issue["updated_at"] != old.get("updated_at", "")
+            if not comment_added and not content_changed:
+                continue
+
+            # 有新评论时拉取评论详情，筛选出上次记录之后的新评论
+            new_comments = []
+            if comment_added:
+                comments = await self.github_service.get_issue_comments(owner, repo, issue["number"])
+                if comments:
+                    last_seen = old.get("last_comment_at", "")
+                    new_comments = [
+                        c for c in comments
+                        if not last_seen or c["created_at"] > last_seen
+                    ]
+                    latest_time = max(
+                        [c["created_at"] for c in new_comments] +
+                        ([last_seen] if last_seen else []) +
+                        [comments[0]["created_at"]]
+                    )
+                    # entry 已被 new_snapshot 引用，这里更新会同步写入快照
+                    entry["last_comment_at"] = latest_time
+
+            updated_issues.append({
+                "issue": {**entry, "number": issue["number"]},
+                "new_comments": new_comments,
+            })
+
+        # 更新快照（不在 open 列表中的 issue 视为已关闭，自动移除）
+        state[repo_name] = new_snapshot
+        self._save_repo_issues_state(state)
+
+        if first_run:
+            logger.info(f"Issues 动态监控：已为 {repo_name} 建立基线快照（{len(new_snapshot)} 个 open issues），本次不推送")
+            return
+
+        if not new_issues and not updated_issues:
+            logger.info(f"Issues 动态监控：{repo_name} 无变化")
+            return
+
+        def _snippet(text: str) -> str:
+            return (text or "").strip()
+
+        message = f"\U0001f4cb Issues 动态 - {repo_name}\n\n"
+        total_new = len(new_issues)
+        total_updated = len(updated_issues)
+
+        for issue in new_issues:
+            labels_str = ""
+            if issue.get("labels"):
+                labels_str = " \U0001f3f7\ufe0f " + ",".join(issue["labels"])
+            message += f"\U0001f195 新增 Issue #{issue['number']} {issue['title']}{labels_str}\n"
+            message += f"   \U0001f464 {issue['author']} | \U0001f517 {issue['url']}\n\n"
+
+        for item in updated_issues:
+            issue = item["issue"]
+            new_comments = item["new_comments"]
+            if new_comments:
+                message += (
+                    f"\U0001f4ac Issue #{issue['number']} {issue['title']} "
+                    f"有新讨论（+{len(new_comments)} 条评论）\n"
+                )
+                for c in new_comments[:3]:
+                    message += f"   └ {c['author']}:\n{_snippet(c['body'])}\n\n"
+                if len(new_comments) > 3:
+                    message += f"   └ ...另有 {len(new_comments) - 3} 条新评论\n"
+            else:
+                message += f"\U0001f504 Issue #{issue['number']} {issue['title']} 有更新\n"
+            message += f"   \U0001f517 {issue['url']}\n\n"
+
+        message += f"\U0001f4ca 新增 {total_new} 个，{total_updated} 个有新动态"
+
+        private_targets = self.config.get("notification_targets", [])
+        global_groups = self.config.get("group_notification_targets", [])
+        all_groups = list(set(global_groups + extra_groups))
+
+        for target in private_targets:
+            try:
+                result = await self.notification_service._send_private_message(str(target), message)
+                if result.get("success", False):
+                    logger.info(f"Issues 动态通知：私聊成功发送给 {target}")
+                else:
+                    logger.warning(f"Issues 动态通知：私聊发送给 {target} 失败")
+            except Exception as e:
+                logger.error(f"Issues 动态通知：私聊发送给 {target} 出错: {str(e)}")
+
+        for group_id in all_groups:
+            try:
+                result = await self.notification_service._send_group_message(str(group_id), message)
+                if result.get("success", False):
+                    logger.info(f"Issues 动态通知：群消息成功发送给 {group_id}")
+                else:
+                    logger.warning(f"Issues 动态通知：群消息发送给 {group_id} 失败")
+            except Exception as e:
+                logger.error(f"Issues 动态通知：群消息发送给 {group_id} 出错: {str(e)}")
 
     @filter.command("github_monitor")
     async def monitor_command(self, event: AstrMessageEvent):

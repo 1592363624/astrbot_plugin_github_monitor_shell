@@ -196,7 +196,8 @@ class GitHubService:
                         "created_at": issue["created_at"],
                         "updated_at": issue["updated_at"],
                         "url": issue["html_url"],
-                        "labels": [label["name"] for label in issue.get("labels", [])]
+                        "labels": [label["name"] for label in issue.get("labels", [])],
+                        "comments": issue.get("comments", 0)
                     })
                 return issues
             elif response.status_code == 404:
@@ -207,6 +208,47 @@ class GitHubService:
                 return None
             else:
                 logger.error(f"获取 open issues 失败: {response.status_code} - {response.text}")
+                return None
+
+        except Exception as e:
+            logger.error(f"请求 GitHub API 失败: {str(e)}")
+            return None
+
+    async def get_issue_comments(self, owner: str, repo: str, issue_number: int) -> Optional[List[Dict]]:
+        """获取指定 issue 的最新评论（按时间倒序，最多返回前30条）"""
+        try:
+            url = f"{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}/comments"
+            params = {
+                "sort": "created",
+                "direction": "desc",
+                "per_page": 30
+            }
+
+            async with httpx.AsyncClient(
+                    timeout=30.0,
+                    verify=False
+            ) as client:
+                response = await client.get(url, headers=self.headers, params=params)
+
+            if response.status_code == 200:
+                comments_data = response.json()
+                return [
+                    {
+                        "author": c["user"]["login"],
+                        "body": (c.get("body") or "").strip(),
+                        "created_at": c["created_at"],
+                        "url": c["html_url"]
+                    }
+                    for c in comments_data
+                ]
+            elif response.status_code == 404:
+                logger.warning(f"Issue 或仓库不存在: {owner}/{repo}#{issue_number}")
+                return None
+            elif response.status_code == 403:
+                logger.error(f"访问被拒绝或API限制: {response.status_code} - {response.text}")
+                return None
+            else:
+                logger.error(f"获取 issue 评论失败: {response.status_code} - {response.text}")
                 return None
 
         except Exception as e:
