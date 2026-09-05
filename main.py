@@ -710,26 +710,24 @@ class GitHubMonitorPlugin(Star):
         global_groups = self.config.get("group_notification_targets", [])
         all_groups = list(set(global_groups + extra_groups))
 
-        # 评论中带图片时，构造图片消息链（Image.fromURL 经平台发送链自动下载转发）
-        image_chain: MessageChain | None = None
+        # 评论中带图片时，把文本与图片合并为同一条消息链（文字在前，图片紧随其后），
+        # Image.fromURL 经平台发送链自动下载转发
+        payload = message
         if issue_images:
             try:
-                image_chain = MessageChain(
-                    chain=[Comp.Image.fromURL(u) for u in issue_images]
+                payload = MessageChain(
+                    chain=[Comp.Plain(message)]
+                    + [Comp.Image.fromURL(u) for u in issue_images]
                 )
             except Exception as e:
-                logger.warning(f"Issues 动态通知：构造图片消息链失败，仅发送文本: {str(e)}")
-                image_chain = None
+                logger.warning(f"Issues 动态通知：构造图文消息链失败，仅发送文本: {str(e)}")
+                payload = message
 
         for target in private_targets:
             try:
-                result = await self.notification_service._send_private_message(str(target), message)
+                result = await self.notification_service._send_private_message(str(target), payload)
                 if result.get("success", False):
                     logger.info(f"Issues 动态通知：私聊成功发送给 {target}")
-                    if image_chain is not None:
-                        await self._send_issue_images(
-                            image_chain, str(target), is_group=False
-                        )
                 else:
                     logger.warning(f"Issues 动态通知：私聊发送给 {target} 失败")
             except Exception as e:
@@ -737,34 +735,13 @@ class GitHubMonitorPlugin(Star):
 
         for group_id in all_groups:
             try:
-                result = await self.notification_service._send_group_message(str(group_id), message)
+                result = await self.notification_service._send_group_message(str(group_id), payload)
                 if result.get("success", False):
                     logger.info(f"Issues 动态通知：群消息成功发送给 {group_id}")
-                    if image_chain is not None:
-                        await self._send_issue_images(
-                            image_chain, str(group_id), is_group=True
-                        )
                 else:
                     logger.warning(f"Issues 动态通知：群消息发送给 {group_id} 失败")
             except Exception as e:
                 logger.error(f"Issues 动态通知：群消息发送给 {group_id} 出错: {str(e)}")
-
-    async def _send_issue_images(self, image_chain: MessageChain, target: str, is_group: bool):
-        """向目标补发 Issues 动态中提取的图片，失败仅记日志不影响文本通知"""
-        send = (
-            self.notification_service._send_group_message
-            if is_group
-            else self.notification_service._send_private_message
-        )
-        kind = "群" if is_group else "私聊"
-        try:
-            result = await send(target, image_chain)
-            if result.get("success", False):
-                logger.info(f"Issues 动态通知：图片消息成功发送给 {kind} {target}")
-            else:
-                logger.warning(f"Issues 动态通知：图片消息发送给 {kind} {target} 失败")
-        except Exception as e:
-            logger.error(f"Issues 动态通知：图片消息发送给 {kind} {target} 出错: {str(e)}")
 
     @filter.command("github_monitor")
     async def monitor_command(self, event: AstrMessageEvent):
