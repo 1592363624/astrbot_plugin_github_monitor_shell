@@ -1,0 +1,3 @@
+# GitHub监控插件依赖
+# AstrBot 已内置 httpx，此处声明以显式表明插件的外部依赖
+httpx>=0.24.0

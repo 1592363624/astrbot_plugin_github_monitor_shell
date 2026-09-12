@@ -28,6 +28,7 @@
 - `group_notification_targets`: 群通知目标，可以将通知发送到指定的群聊中
 - `time_zone`: 时间显示时区（默认 `Asia/Shanghai`，即可显示为北京时间）
 - `time_format`: 时间显示格式，使用 Python `strftime` 语法，默认 `%Y-%m-%d %H:%M:%S`
+- `forward_merge`: 合并转发推送，开启后本轮轮询检测到的 commit 通知会先收集、再整合成一条「合并转发」聊天记录发送
 
 ## 推送目标格式
 
@@ -121,6 +122,33 @@ QQ 官方机器人（qq_official / qq_official_webhook）没有传统数字群�
 - `enable_group_file_upload` + `group_file_folder`: 上传到群文件指定文件夹（不存在自动创建，留空为根目录）
 - `enable_group_album_upload` + `group_album_name` + `group_album_strict_mode`: 上传到群相册（NapCat 扩展 API）；严格模式下找不到指定相册会放弃上传，防止误传
 
+
+## 合并转发推送（Commit）
+
+开启后，插件仍然按照原来的方式定时轮询所有配置的监听仓库；区别在于**本轮检测到的 commit 通知不再逐条发送**，而是先逐条收集起来，最后按推送目标整合成**一条「合并转发」聊天记录**发送到对应的群 / 私聊，每个 commit 通知作为转发记录里的一个节点。以下选项均位于插件配置的「合并转发推送（Commit）」分组：
+
+- `enabled`: 是否启用合并转发（默认关闭，关闭时维持原本的逐条发送行为）
+- `content_mode`: 转发节点内容形式
+  - `follow`（默认）：跟随「文转图（图片通知）」分组中的 `commit_output_format`——`text` 生成文字节点，`image` 生成图片卡片节点
+  - `text`：节点一律使用文字
+  - `image`：节点一律使用图片卡片（需先配置好 T2I 文转图服务；单个节点渲染失败时自动回退为文字节点，不影响其他节点）
+- `node_name` / `node_uin`: 转发记录中每个节点显示的昵称与账号（仅用于展示，建议把 `node_uin` 填成机器人自身的 QQ 号）
+- `max_nodes_per_message`: 单条合并转发的最大节点数（默认 20），本轮收集到的 commit 超过该数量时会拆分为多条合并转发依次发送
+- `fallback_to_normal`: 平台不支持合并转发时是否降级为普通消息（默认开启）
+
+### 合并规则
+
+1. 插件按原有逻辑轮询仓库，检测到新 commit 时只把通知放入待发送队列，不立即发送；
+2. 本轮所有仓库检查完成后，按推送目标分组：同一个目标收到的所有 commit 通知合并为一条转发记录（节点顺序即检测顺序）；
+3. 全局群通知目标、仓库专属群目标、私聊目标分别独立成组，互不影响；
+4. 若某个目标发送失败，该目标会被写入待重试队列，下一轮轮询时自动重试，其余目标不受影响。
+
+### 平台支持
+
+合并转发（OneBot v11 的 `send_group_forward_msg` / `send_private_forward_msg`）目前**仅 aiocqhttp（NapCat / Lagrange 等 OneBot 实现）支持**：
+
+- 向 aiocqhttp 目标推送时，发送合并转发聊天记录；
+- 向 qq_official / qq_official_webhook / Telegram 等不支持合并转发的平台推送时，默认自动降级为逐条普通消息，保证不漏通知；把 `fallback_to_normal` 关掉则这些目标会被判定为发送失败并进入重试队列。
 
 ## 🐔 联系作者
 

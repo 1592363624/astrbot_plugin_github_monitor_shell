@@ -158,5 +158,50 @@
         "hint": "开启后，找不到指定名称的相册时放弃上传，防止误传到默认相册；关闭后回退到相册列表第一个"
       }
     }
+  },
+  "forward_merge": {
+    "type": "object",
+    "description": "合并转发推送（Commit）",
+    "hint": "开启后，插件仍按原方式定时轮询监听仓库，但本轮检测到的 commit 通知不再逐条发送，而是先收集起来，最后整合成一条「合并转发」聊天记录发送到配置的群/私聊。合并转发仅 aiocqhttp（OneBot v11，如 NapCat/Lagrange）平台支持，其他平台会按配置自动降级为逐条普通消息。",
+    "items": {
+      "enabled": {
+        "type": "bool",
+        "description": "以合并转发形式发送 Commit 通知",
+        "default": false,
+        "hint": "开启后，每次轮询中所有仓库检测到的 commit 通知会合并为一条转发聊天记录；关闭则维持原本的逐条发送行为"
+      },
+      "content_mode": {
+        "type": "string",
+        "description": "合并转发节点内容形式",
+        "options": ["follow", "text", "image"],
+        "default": "follow",
+        "hint": "follow：跟随「文转图（图片通知）」分组里的 Commit 通知输出格式（text→文字节点，image→图片卡片节点）；text：节点一律使用文字；image：节点一律使用图片卡片（需先配置好 T2I 文转图服务，单个节点渲染失败时自动回退为文字节点）"
+      },
+      "node_name": {
+        "type": "string",
+        "description": "转发节点显示昵称",
+        "default": "GitHub监控",
+        "hint": "合并转发记录中每个节点的发送者昵称，仅用于展示"
+      },
+      "node_uin": {
+        "type": "string",
+        "description": "转发节点显示账号",
+        "default": "10000",
+        "hint": "合并转发记录中每个节点的发送者账号（uin），仅用于展示，建议填写机器人自身的QQ号"
+      },
+      "max_nodes_per_message": {
+        "type": "int",
+        "description": "单条合并转发的最大节点数",
+        "default": 20,
+        "hint": "本轮收集到的 commit 记录超过该数量时会拆分为多条合并转发依次发送（QQ 对单条转发记录的节点数有限制）",
+        "slider": {"min": 1, "max": 100, "step": 1}
+      },
+      "fallback_to_normal": {
+        "type": "bool",
+        "description": "平台不支持合并转发时降级为普通消息",
+        "default": true,
+        "hint": "开启后，向 qq_official / Telegram 等不支持合并转发的平台推送时会自动回退为逐条普通消息，保证不漏通知；关闭则这些目标会被标记为发送失败并进入重试队列"
+      }
+    }
   }
 }
