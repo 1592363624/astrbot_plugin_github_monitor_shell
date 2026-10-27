@@ -70,6 +70,18 @@
   .sha a { color: #33ff33; text-decoration: none; }
   .message { color: #33ff33; flex: 1; min-width: 0; word-break: break-word; overflow-wrap: anywhere; }
   .meta { color: #1a8f1a; font-size: 11px; padding-left: 18px; }
+  .meta .add { color: #7cff7c; }
+  .meta .del { color: #ff5555; }
+  .meta .files { color: #33ff33; }
+  .summary {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px dashed #0f3d0f;
+    color: #1a8f1a;
+    font-size: 11px;
+  }
+  .summary .add { color: #7cff7c; }
+  .summary .del { color: #ff5555; }
   .empty { color: #1a8f1a; padding: 8px 0; }
   .footer {
     margin-top: 10px;
@@ -105,11 +117,14 @@
         <span class="sha">{% if c.url %}<a href="{{ c.url }}">{{ c.sha_short or '-------' }}</a>{% else %}{{ c.sha_short or '-------' }}{% endif %}</span>
         <span class="message">{{ c.message or '(无提交信息)' }}</span>
       </div>
-      <div class="meta">-- {{ c.author or '未知作者' }} @ {{ c.time or '' }}</div>
+      <div class="meta">-- {{ c.author or '未知作者' }} @ {{ c.time or '' }}{% if c.has_stats %} · <span class="add">+{{ c.stats_additions or 0 }}</span> <span class="del">-{{ c.stats_deletions or 0 }}</span>{% if c.stats_files is not none %} · {{ c.stats_files }} FILES{% endif %}{% endif %}</div>
     </div>
     {% else %}
     <div class="empty">&gt; NO NEW COMMITS_</div>
     {% endfor %}
+    {% if has_total_stats %}
+    <div class="summary">&gt;&gt; TOTAL: <span class="add">+{{ total_additions }}</span> <span class="del">-{{ total_deletions }}</span></div>
+    {% endif %}
   </div>
   <div class="footer">UPDATED: {{ generated_at or '未知' }}<span class="cursor"></span></div>
 </div>

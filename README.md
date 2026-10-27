@@ -29,6 +29,7 @@
 - `time_zone`: 时间显示时区（默认 `Asia/Shanghai`，即可显示为北京时间）
 - `time_format`: 时间显示格式，使用 Python `strftime` 语法，默认 `%Y-%m-%d %H:%M:%S`
 - `forward_merge`: 合并转发推送，开启后本轮轮询检测到的 commit 通知会先收集、再整合成一条「合并转发」聊天记录发送
+- `commit_stats`: 提交变更统计（默认开启），在通知中显示本次提交的改动文件数与增删行数，多个提交时额外汇总一行「本轮总计」；`max_commits` 控制单次通知最多统计几个提交（默认 10，填 0 关闭统计）
 
 ## 推送目标格式
 
@@ -111,7 +112,7 @@ QQ 官方机器人（qq_official / qq_official_webhook）没有传统数字群�
 
 ### 自定义模板
 
-把 `.html` 文件放入插件数据目录的 `templates/` 文件夹（通常 `AstrBot/data/plugin_data/GitHub监控插件/templates/`），文件名（不含后缀）即模板名，填到 `commit_image_template` 即可使用，也会加入 `random` 的随机池。模板为 Jinja2 语法，可用变量：`title`、`repo_name`、`repo_url`、`branch`（可为 `None`）、`commit_count`、`generated_at`、`commits`（每项含 `sha_short` / `message` / `author` / `time` / `url`）。
+把 `.html` 文件放入插件数据目录的 `templates/` 文件夹（通常 `AstrBot/data/plugin_data/GitHub监控插件/templates/`），文件名（不含后缀）即模板名，填到 `commit_image_template` 即可使用，也会加入 `random` 的随机池。模板为 Jinja2 语法，可用变量：`title`、`repo_name`、`repo_url`、`branch`（可为 `None`）、`commit_count`、`generated_at`、`commits`（每项含 `sha_short` / `message` / `author` / `time` / `url`，以及变更统计 `has_stats` / `stats_additions` / `stats_deletions` / `stats_files`，未开启统计或合并提交等场景 `has_stats` 为 `False`），以及多提交汇总 `has_total_stats` / `total_additions` / `total_deletions`。
 
 模板需完全自包含（CSS 内联、无外部资源），并在 `<head>` 加上 `<meta name="viewport" content="width=<卡片宽度>, height=10">` 让 T2I 按内容裁剪，可参考内置 `templates/<主题>/commit_card.html`。
 

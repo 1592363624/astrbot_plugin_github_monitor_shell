@@ -82,6 +82,26 @@
     "default": 2000,
     "hint": "超过该长度的纯文本通知会自动拆分为多条消息依次发送（QQ 对单条消息长度有限制，过长会导致整条发送失败）。推送通知与命令查询回复均生效"
   },
+  "commit_stats": {
+    "type": "object",
+    "description": "提交变更统计",
+    "hint": "在提交通知中显示本次提交的改动文件数与增删行数（+新增 / -删除）。统计信息来自 GitHub 单提交详情接口：最新提交通常随已有请求一并返回，历史提交需逐个补查；未配置 github_token 时 GitHub API 每小时仅 60 次请求，请按需开启",
+    "items": {
+      "enabled": {
+        "type": "bool",
+        "description": "显示文件数与增删行数",
+        "default": true,
+        "hint": "关闭后通知保持原样，且不会产生额外的 GitHub API 请求"
+      },
+      "max_commits": {
+        "type": "int",
+        "description": "单次通知最多统计的提交数",
+        "default": 10,
+        "hint": "一次检测到多个新提交时，最多为前 N 个提交补全统计信息，避免一次轮询产生过多 API 请求；填 0 表示不统计",
+        "slider": {"min": 0, "max": 50, "step": 1}
+      }
+    }
+  },
   "image_output": {
     "type": "object",
     "description": "文转图（图片通知）",

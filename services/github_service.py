@@ -48,7 +48,9 @@ class GitHubService:
                     "message": commit_data["commit"]["message"],
                     "author": commit_data["commit"]["author"]["name"],
                     "date": commit_data["commit"]["author"]["date"],
-                    "url": commit_data["html_url"]
+                    "url": commit_data["html_url"],
+                    # 单提交详情接口自带变更统计，无需额外请求
+                    "stats": self._extract_commit_stats(commit_data)
                 }
             elif response.status_code == 404:
                 # 仓库不存在或分支不存在
@@ -132,6 +134,79 @@ class GitHubService:
         except Exception as e:
             logger.error(f"请求GitHub API失败: {str(e)}")
             return None
+
+    @staticmethod
+    def _extract_commit_stats(commit_data: Dict) -> Optional[Dict]:
+        """从单提交详情响应中提取变更统计
+
+        合并提交、超大 diff 等场景 GitHub 可能不返回 stats/files，此时返回 None，
+        由调用方跳过展示（不阻塞通知）。
+        """
+        stats = commit_data.get("stats")
+        if not isinstance(stats, dict):
+            return None
+        files = commit_data.get("files")
+        return {
+            "additions": int(stats.get("additions") or 0),
+            "deletions": int(stats.get("deletions") or 0),
+            "total": int(stats.get("total") or 0),
+            "changed_files": len(files) if isinstance(files, list) else None
+        }
+
+    async def get_commit_stats(self, owner: str, repo: str, sha: str) -> Optional[Dict]:
+        """获取单个 commit 的变更统计（改动文件数、新增/删除行数）
+
+        注意：commit 列表接口不返回统计信息，只能逐个查询单提交详情接口。
+        """
+        try:
+            url = f"{self.base_url}/repos/{owner}/{repo}/commits/{sha}"
+
+            async with httpx.AsyncClient(
+                    timeout=30.0,
+                    verify=False
+            ) as client:
+                response = await client.get(url, headers=self.headers)
+
+            if response.status_code == 200:
+                return self._extract_commit_stats(response.json())
+            elif response.status_code == 404:
+                logger.warning(f"commit 不存在: {owner}/{repo}@{sha[:7]}")
+                return None
+            elif response.status_code == 403:
+                logger.error(f"访问被拒绝或API限制: {response.status_code} - {response.text}")
+                return None
+            else:
+                logger.error(f"获取 commit 统计失败: {response.status_code} - {response.text}")
+                return None
+
+        except Exception as e:
+            logger.error(f"请求GitHub API失败: {str(e)}")
+            return None
+
+    async def enrich_commit_stats(self, owner: str, repo: str, commits: List[Dict],
+                                  max_commits: int = 10) -> List[Dict]:
+        """为缺少统计信息的 commit 补全变更统计（原地写入 stats 字段）
+
+        已带 stats 的提交不会重复请求；最多补全 ``max_commits`` 个，
+        ``max_commits <= 0`` 时不做任何请求。单个提交查询失败不影响其他提交。
+        """
+        if max_commits <= 0:
+            return commits
+
+        queried = 0
+        for commit in commits:
+            if queried >= max_commits:
+                break
+            if commit.get("stats"):
+                continue
+            sha = commit.get("sha")
+            if not sha:
+                continue
+            queried += 1
+            stats = await self.get_commit_stats(owner, repo, sha)
+            if stats:
+                commit["stats"] = stats
+        return commits
 
     async def get_repository_info(self, owner: str, repo: str) -> Optional[Dict]:
         """获取仓库信息"""

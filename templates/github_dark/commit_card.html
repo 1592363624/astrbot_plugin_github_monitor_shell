@@ -76,6 +76,26 @@
   .meta { color: #8b949e; font-size: 12px; margin-top: 2px; }
   .meta .author { color: #8b949e; font-weight: 600; }
   .meta .time { margin-left: 6px; }
+  .stats {
+    margin-top: 3px;
+    font-size: 12px;
+    font-family: Consolas, "Courier New", monospace;
+  }
+  .stats .add { color: #3fb950; }
+  .stats .del { color: #f85149; }
+  .stats .files { color: #8b949e; margin-left: 6px; }
+  .summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-top: 1px solid #30363d;
+    color: #8b949e;
+    font-size: 12px;
+    font-family: Consolas, "Courier New", monospace;
+  }
+  .summary .add { color: #3fb950; }
+  .summary .del { color: #f85149; }
   .empty {
     padding: 16px;
     color: #8b949e;
@@ -110,11 +130,15 @@
     <div class="msg-wrap">
       <div class="message">{{ c.message or '(无提交信息)' }}</div>
       <div class="meta"><span class="author">{{ c.author or '未知作者' }}</span><span class="time">{{ c.time or '' }}</span></div>
+      {% if c.has_stats %}<div class="stats"><span class="add">+{{ c.stats_additions or 0 }}</span> <span class="del">-{{ c.stats_deletions or 0 }}</span>{% if c.stats_files is not none %}<span class="files">{{ c.stats_files }} 个文件</span>{% endif %}</div>{% endif %}
     </div>
   </div>
   {% else %}
   <div class="empty">暂无新提交</div>
   {% endfor %}
+  {% if has_total_stats %}
+  <div class="summary"><span>本轮总计</span><span class="add">+{{ total_additions }}</span><span class="del">-{{ total_deletions }}</span></div>
+  {% endif %}
   <div class="footer">更新时间：{{ generated_at or '未知' }}</div>
 </div>
 </body>

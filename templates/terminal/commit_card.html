@@ -60,7 +60,24 @@
   .commit { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 13px; line-height: 1.5; }
   .sha { color: #e5c07b; flex-shrink: 0; }
   .sha a { color: #e5c07b; text-decoration: none; }
-  .message { color: #f0f0f0; flex: 1; min-width: 0; word-break: break-word; overflow-wrap: anywhere; }
+  .commit-main { flex: 1; min-width: 0; }
+  .message { color: #f0f0f0; word-break: break-word; overflow-wrap: anywhere; }
+  .stats { display: block; font-size: 11px; margin-top: 1px; }
+  .stats .add { color: #98c379; }
+  .stats .del { color: #e06c75; }
+  .stats .files { color: #6a6a6a; margin-left: 6px; }
+  .summary {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px dashed #3a3a3a;
+    font-size: 11px;
+    color: #8a8a8a;
+  }
+  .summary .add { color: #98c379; }
+  .summary .del { color: #e06c75; }
   .meta { flex-shrink: 0; font-size: 11px; }
   .author { color: #56b6c2; }
   .time { color: #6a6a6a; margin-left: 8px; }
@@ -96,12 +113,18 @@
     {% for c in commits %}
     <div class="commit">
       <span class="sha">{% if c.url %}<a href="{{ c.url }}">{{ c.sha_short or '-------' }}</a>{% else %}{{ c.sha_short or '-------' }}{% endif %}</span>
-      <span class="message">{{ c.message or '(无提交信息)' }}</span>
+      <div class="commit-main">
+        <span class="message">{{ c.message or '(无提交信息)' }}</span>
+        {% if c.has_stats %}<span class="stats"><span class="add">+{{ c.stats_additions or 0 }}</span> <span class="del">-{{ c.stats_deletions or 0 }}</span>{% if c.stats_files is not none %}<span class="files">{{ c.stats_files }} 个文件</span>{% endif %}</span>{% endif %}
+      </div>
       <span class="meta"><span class="author">{{ c.author or '未知作者' }}</span><span class="time">{{ c.time or '' }}</span></span>
     </div>
     {% else %}
     <div class="empty">（暂无新提交）</div>
     {% endfor %}
+    {% if has_total_stats %}
+    <div class="summary"><span>total:</span><span class="add">+{{ total_additions }}</span><span class="del">-{{ total_deletions }}</span></div>
+    {% endif %}
     <div class="footer">更新时间：{{ generated_at or '未知' }}</div>
   </div>
 </div>

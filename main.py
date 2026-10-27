@@ -34,6 +34,13 @@ class GitHubMonitorPlugin(Star):
         self.max_comment_length = int(self.config.get("max_comment_length", 400) or 400)
         self.message_max_length = int(self.config.get("message_max_length", 2000) or 2000)
         self.github_service = GitHubService(self.config.get("github_token", ""))
+        # commit 变更统计（文件数 / 增删行数）：需要额外的单提交详情请求，故受开关与数量上限控制
+        commit_stats_cfg = self.config.get("commit_stats", {}) or {}
+        self.commit_stats_enabled = bool(commit_stats_cfg.get("enabled", True))
+        try:
+            self.commit_stats_max_commits = max(0, int(commit_stats_cfg.get("max_commits", 10)))
+        except (TypeError, ValueError):
+            self.commit_stats_max_commits = 10
         plugin_data_dir = StarTools.get_data_dir("GitHub监控插件")
         # 文转图相关服务（模板目录：插件内置 templates/ + 数据目录自定义 templates/）
         template_manager = TemplateManager(
@@ -557,6 +564,12 @@ class GitHubMonitorPlugin(Star):
                     if self._is_commit_already_notified(repo_key, latest_sha, all_groups):
                         logger.info(f"仓库 {repo_key} 的提交 {latest_sha[:7]} 已经发送过通知，跳过")
                     else:
+                        # 补全变更统计（文件数 / 增删行数），仅在真正要推送时调用，避免浪费 API 配额
+                        if self.commit_stats_enabled and self.commit_stats_max_commits > 0:
+                            await self.github_service.enrich_commit_stats(
+                                owner, repo, new_commits, self.commit_stats_max_commits
+                            )
+
                         # 合并转发模式：本轮只收集，待所有仓库检查完成后统一整合发送
                         if self.notification_service.forward_merge_enabled:
                             self.notification_service.queue_commit_notification(

@@ -65,6 +65,7 @@ class ImageRenderService:
             formatted = format_commit_datetime(
                 commit.get("date", ""), self.time_zone, self.time_format
             )
+            stats = commit.get("stats") or {}
             commits.append(
                 {
                     "sha_short": (commit.get("sha") or "")[:7],
@@ -72,6 +73,11 @@ class ImageRenderService:
                     "author": commit.get("author", ""),
                     "time": formatted or commit.get("date", ""),
                     "url": commit.get("url", ""),
+                    # 变更统计：合并提交等场景可能没有，模板按 has_stats 决定是否展示
+                    "has_stats": isinstance(stats, dict) and bool(stats),
+                    "stats_additions": stats.get("additions"),
+                    "stats_deletions": stats.get("deletions"),
+                    "stats_files": stats.get("changed_files"),
                 }
             )
 
@@ -82,12 +88,24 @@ class ImageRenderService:
         except Exception:
             generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # 多提交时汇总增删行数（单提交的统计已在提交行内展示，不再重复）
+        total_additions = sum(
+            int(c.get("stats_additions") or 0) for c in commits if c["has_stats"]
+        )
+        total_deletions = sum(
+            int(c.get("stats_deletions") or 0) for c in commits if c["has_stats"]
+        )
+        has_total_stats = len(commits) > 1 and any(c["has_stats"] for c in commits)
+
         return {
             "title": "GitHub 仓库更新通知",
             "repo_name": f"{owner}/{repo}",
             "repo_url": repo_info.get("html_url", ""),
             "branch": branch,
             "commit_count": len(commits),
+            "has_total_stats": has_total_stats,
+            "total_additions": total_additions,
+            "total_deletions": total_deletions,
             "generated_at": generated_at,
             "commits": commits,
         }

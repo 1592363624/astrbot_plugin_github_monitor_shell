@@ -1146,6 +1146,38 @@ class NotificationService:
         suffix = f"_{sha}" if sha else ""
         return f"github_commit_{owner}_{repo}{suffix}_{timestamp}.png"
 
+    @staticmethod
+    def _format_commit_stats(commit: Dict) -> str:
+        """格式化 commit 的变更统计（增删行数 + 改动文件数），无统计时返回空串"""
+        stats = commit.get("stats")
+        if not isinstance(stats, dict):
+            return ""
+        line = (
+            f"📊 变更: +{int(stats.get('additions') or 0)} "
+            f"-{int(stats.get('deletions') or 0)}"
+        )
+        changed_files = stats.get("changed_files")
+        if changed_files is not None:
+            line += f"（{int(changed_files)} 个文件）"
+        return line
+
+    @staticmethod
+    def _sum_commit_stats(commits: List[Dict]) -> Optional[Dict]:
+        """汇总多个提交的增删行数；没有任何统计信息时返回 None"""
+        additions = 0
+        deletions = 0
+        counted = 0
+        for commit in commits:
+            stats = commit.get("stats")
+            if not isinstance(stats, dict):
+                continue
+            additions += int(stats.get("additions") or 0)
+            deletions += int(stats.get("deletions") or 0)
+            counted += 1
+        if not counted:
+            return None
+        return {"additions": additions, "deletions": deletions, "counted": counted}
+
     def _format_commit_message(self, repo_info: Dict, new_commits: List[Dict]) -> str:
         """格式化commit消息"""
         repo_name = f"{repo_info['owner']['login']}/{repo_info['name']}"
@@ -1170,6 +1202,9 @@ class NotificationService:
             else:
                 message += f"📅 时间: {commit['date']}\n"
             message += f"💬 信息: {commit['message']}\n"
+            stats_line = self._format_commit_stats(commit)
+            if stats_line:
+                message += f"{stats_line}\n"
             message += f"🔗 链接: {commit['url']}\n\n"
         else:
             # 有多个提交的格式
@@ -1188,7 +1223,15 @@ class NotificationService:
                 else:
                     message += f"   📅 时间: {commit['date']}\n"
                 message += f"   💬 信息: {commit['message']}\n"
+                stats_line = self._format_commit_stats(commit)
+                if stats_line:
+                    message += f"   {stats_line}\n"
                 message += f"   🔗 链接: {commit['url']}\n\n"
+
+            # 多个提交时汇总增删行数（单提交的统计已在上方单独展示，不重复）
+            summary = self._sum_commit_stats(new_commits)
+            if summary:
+                message += f"📊 本轮总计: +{summary['additions']} -{summary['deletions']}\n"
 
         return message
 
