@@ -1201,10 +1201,11 @@ class NotificationService:
                 message += f"📅 时间: {formatted_date}\n"
             else:
                 message += f"📅 时间: {commit['date']}\n"
-            message += f"💬 信息: {commit['message']}\n"
+            # 统计行放在信息之前：信息为多行正文，放后面会被正文顶出信息块
             stats_line = self._format_commit_stats(commit)
             if stats_line:
                 message += f"{stats_line}\n"
+            message += f"💬 信息: {commit['message']}\n"
             message += f"🔗 链接: {commit['url']}\n\n"
         else:
             # 有多个提交的格式
@@ -1222,10 +1223,10 @@ class NotificationService:
                     message += f"   📅 时间: {formatted_date}\n"
                 else:
                     message += f"   📅 时间: {commit['date']}\n"
-                message += f"   💬 信息: {commit['message']}\n"
                 stats_line = self._format_commit_stats(commit)
                 if stats_line:
                     message += f"   {stats_line}\n"
+                message += f"   💬 信息: {commit['message']}\n"
                 message += f"   🔗 链接: {commit['url']}\n\n"
 
             # 多个提交时汇总增删行数（单提交的统计已在上方单独展示，不重复）
